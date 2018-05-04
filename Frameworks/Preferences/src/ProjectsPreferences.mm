@@ -3,7 +3,7 @@
 #import <settings/settings.h>
 #import <OakAppKit/NSImage Additions.h>
 #import <OakAppKit/NSMenuItem Additions.h>
-#import <OakAppKit/OakTabBarView.h>
+#import <OakTabBarView/OakTabBarView.h>
 #import <OakFoundation/NSString Additions.h>
 #import <OakFoundation/OakStringListTransformer.h>
 
@@ -45,7 +45,7 @@
 	[openPanel setCanChooseFiles:NO];
 	[openPanel setCanChooseDirectories:YES];
 	[openPanel beginSheetModalForWindow:[self view].window completionHandler:^(NSInteger result) {
-		if(result == NSOKButton)
+		if(result == NSFileHandlingPanelOKButton)
 			[[NSUserDefaults standardUserDefaults] setObject:[[openPanel URL] absoluteString] forKey:kUserDefaultsInitialFileBrowserURLKey];
 		[self updatePathPopUp];
 	}];

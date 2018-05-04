@@ -149,6 +149,7 @@ namespace
 }
 
 static NSMutableDictionary<NSString*, OakPasteboard*>* SharedInstances = [NSMutableDictionary new];
+static BOOL HasPersistentStore = NO;
 
 @implementation OakPasteboard
 @dynamic name, currentEntry, auxiliaryOptionsForCurrent, primitiveCurrentEntry;
@@ -244,9 +245,9 @@ static NSMutableDictionary<NSString*, OakPasteboard*>* SharedInstances = [NSMuta
 					continue;
 			}
 			[NSApp presentError:error];
-			crash_reporter_info_t info(to_s(error));
-			abort();
+			break;
 		}
+		HasPersistentStore = YES;
 	}
 	return persistentStoreCoordinator;
 }
@@ -321,7 +322,7 @@ static NSMutableDictionary<NSString*, OakPasteboard*>* SharedInstances = [NSMuta
 		return YES;
 
 	BOOL res = YES;
-	if([self.managedObjectContext hasChanges])
+	if([self.managedObjectContext hasChanges] && HasPersistentStore)
 	{
 		for(NSString* name in SharedInstances)
 			[SharedInstances[name] pruneHistory:self];
@@ -332,7 +333,11 @@ static NSMutableDictionary<NSString*, OakPasteboard*>* SharedInstances = [NSMuta
 				NSLog(@"failed to save context: %@", error);
 		}
 		@catch(NSException* e) {
-			NSRunAlertPanel(@"Failed Saving Clipboard History", @"CoreData threw the following exception: %@", @"Continue", nil, nil, e);
+			NSAlert* alert        = [[NSAlert alloc] init];
+			alert.messageText     = @"Failed Saving Clipboard History";
+			alert.informativeText = [NSString stringWithFormat:@"CoreData threw the following exception: %@", e];
+			[alert addButtonWithTitle:@"Continue"];
+			[alert runModal];
 		}
 	}
 	return res;
@@ -562,7 +567,7 @@ static NSMutableDictionary<NSString*, OakPasteboard*>* SharedInstances = [NSMuta
 	return self.current;
 }
 
-- (BOOL)selectItemAtPosition:(NSPoint)location withWidth:(CGFloat)width respondToSingleClick:(BOOL)singleClick
+- (void)selectItemAtPosition:(NSPoint)location withWidth:(CGFloat)width respondToSingleClick:(BOOL)singleClick
 {
 	[self checkForExternalPasteboardChanges];
 	NSFetchRequest* request = [NSFetchRequest fetchRequestWithEntityName:@"PasteboardEntry"];
@@ -574,7 +579,7 @@ static NSMutableDictionary<NSString*, OakPasteboard*>* SharedInstances = [NSMuta
 	if(!entries)
 	{
 		NSLog(@"%s %@", sel_getName(_cmd), error);
-		return NO;
+		return;
 	}
 
 	NSUInteger selectedRow = self.currentEntry ? [entries indexOfObject:self.currentEntry] : 0;
@@ -585,18 +590,19 @@ static NSMutableDictionary<NSString*, OakPasteboard*>* SharedInstances = [NSMuta
 		[pasteboardSelector setWidth:width];
 	if(singleClick)
 		[pasteboardSelector setPerformsActionOnSingleClick];
-	selectedRow = [pasteboardSelector showAtLocation:location];
 
-	NSSet* keep = [NSSet setWithArray:[pasteboardSelector entries]];
+	NSInteger newSelection = [pasteboardSelector showAtLocation:location];
+	NSArray* newEntries = [pasteboardSelector entries];
+
+	NSSet* keep = [NSSet setWithArray:newEntries];
 	for(OakPasteboardEntry* entry in entries)
 	{
 		if(![keep containsObject:entry])
 			[entry.managedObjectContext deleteObject:entry];
 	}
 
-	self.currentEntry = [[pasteboardSelector entries] objectAtIndex:selectedRow];
-
-	return [pasteboardSelector shouldSendAction];
+	if(newSelection != -1)
+		self.currentEntry = [newEntries objectAtIndex:newSelection];
 }
 
 - (void)selectItemForControl:(NSView*)controlView

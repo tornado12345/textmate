@@ -7,6 +7,8 @@
 #include <text/case.h>
 #include <text/utf8.h>
 #include <text/transcode.h>
+#include <text/encode.h>
+#include <text/format.h>
 #include <cf/cf.h>
 
 OAK_DEBUG_VAR(FormatString);
@@ -15,7 +17,7 @@ struct expand_visitor : boost::static_visitor<void>
 {
 	WATCH_LEAKS(expand_visitor);
 
-	std::map<std::string, std::string> variables;
+	std::function<std::string(std::string const&, std::string const&)> variable;
 	snippet::run_command_callback_t* callback;
 	std::string res;
 	std::vector< std::pair<size_t, parser::case_change::type> > case_changes;
@@ -25,7 +27,7 @@ struct expand_visitor : boost::static_visitor<void>
 	std::multimap<size_t, snippet::field_ptr> mirrors;
 	std::multimap<size_t, snippet::field_ptr> ambiguous;
 
-	expand_visitor (std::map<std::string, std::string> const& variables, snippet::run_command_callback_t* callback) : variables(variables), callback(callback)
+	expand_visitor (std::function<std::string(std::string const&, std::string const&)> const& variable, snippet::run_command_callback_t* callback) : variable(variable), callback(callback)
 	{
 		rank_count = 0;
 	}
@@ -78,17 +80,27 @@ struct expand_visitor : boost::static_visitor<void>
 		{
 			res.insert(res.end(), it, m.buffer() + m.begin());
 
-			std::map<std::string, std::string> tmp(m.captures());
-			tmp.insert(variables.begin(), variables.end());
+			std::set<std::string> eclipsed;
 			for(size_t i = 0; i < m.size(); ++i)
 			{
 				if(!m.did_match(i))
-					tmp.erase(std::to_string(i));
+					eclipsed.erase(std::to_string(i));
 			}
 
-			tmp.swap(variables);
-			traverse(format);
-			tmp.swap(variables);
+			auto getVariable = [&](std::string const& name, std::string const& fallback) -> std::string {
+				if(eclipsed.find(name) == eclipsed.end())
+				{
+					auto const captures = m.captures();
+					auto const it = captures.find(name);
+					return it != captures.end() ? it->second : this->variable(name, fallback);
+				}
+				return fallback;
+			};
+
+			expand_visitor tmp(getVariable, callback);
+			tmp.traverse(format);
+			tmp.handle_case_changes();
+			res += tmp.res;
 
 			it = m.buffer() + m.end();
 			if(!repeat)
@@ -104,42 +116,32 @@ struct expand_visitor : boost::static_visitor<void>
 		res.insert(res.end(), it, last);
 	}
 
-	std::map<std::string, std::string>::const_iterator variable (std::string const& name) const
-	{
-		std::map<std::string, std::string>::const_iterator it = variables.find(name);
-		return it != variables.end() && it->second != NULL_STR ? it : variables.end();
-	}
-
 	void operator() (parser::variable_t const& v)
 	{
-		std::map<std::string, std::string>::const_iterator it = variable(v.name);
-		if(it != variables.end())
-			res += it->second;
+		res += variable(v.name, std::string());
 	}
 
 	void operator() (parser::variable_transform_t const& v)
 	{
-		expand_visitor tmp(variables, callback);
+		expand_visitor tmp(variable, callback);
 		tmp.traverse(v.pattern);
 		tmp.handle_case_changes();
 		auto ptrn = regexp::pattern_t(tmp.res, parser::convert(v.options));
 
-		std::map<std::string, std::string>::const_iterator it = variable(v.name);
-		replace(it != variables.end() ? it->second : "", ptrn, v.format, v.options & parser::regexp_options::g);
+		replace(variable(v.name, std::string()), ptrn, v.format, v.options & parser::regexp_options::g);
 	}
 
 	void operator() (parser::variable_fallback_t const& v)
 	{
-		std::map<std::string, std::string>::const_iterator it = variable(v.name);
-		if(it != variables.end())
-				res += it->second;
+		std::string const value = variable(v.name, NULL_STR);
+		if(value != NULL_STR)
+				res += value;
 		else	traverse(v.fallback);
 	}
 
 	void operator() (parser::variable_condition_t const& v)
 	{
-		std::map<std::string, std::string>::const_iterator it = variable(v.name);
-		traverse(it != variables.end() ? v.if_set : v.if_not_set);
+		traverse(variable(v.name, NULL_STR) != NULL_STR ? v.if_set : v.if_not_set);
 	}
 
 	static std::string capitalize (std::string const& src)
@@ -169,12 +171,108 @@ struct expand_visitor : boost::static_visitor<void>
 		return buffer;
 	}
 
+	static std::string shell_escape (std::string const& src)
+	{
+		std::string const special   = "|&;<>()$`\\\" \t\n*?[#˜=%";
+		std::string const separator = "'";
+
+		std::string res;
+
+		std::string::size_type bow = 0;
+		while(true)
+		{
+			std::string::size_type eow   = src.find(separator, bow);
+			std::string::size_type count = eow == std::string::npos ? eow : eow - bow;
+			std::string const word = src.substr(bow, count);
+
+			bool needQuotes = word.find_first_of(special) != std::string::npos;
+			if(needQuotes)
+				res += "'";
+			res += word;
+			if(needQuotes)
+				res += "'";
+
+			if(eow == std::string::npos)
+				break;
+
+			res += "\\'";
+			bow = eow + separator.size();
+		}
+		return res;
+	}
+
+	static std::string relative_time (std::string const& src)
+	{
+		time_t now = time(nullptr);
+		for(auto format : { "%F %T %z", "%F %T", "%F", "%T" })
+		{
+			struct tm bsdTime = *gmtime(&now);
+			if(strptime(src.c_str(), format, &bsdTime))
+			{
+				static char const DateWithoutTZ[] = "YYYY-MM-DD HH:MM:SS";
+				bool hasTZ = src.size() > sizeof(DateWithoutTZ);
+
+				double const duration = round(difftime(now, hasTZ ? mktime(&bsdTime) : timegm(&bsdTime)));
+				char* tmp = nullptr;
+
+				if(duration < 0)             asprintf(&tmp, "in the future");
+				else if(duration < 2)        asprintf(&tmp, "just now"); // TODO Should be ‘today’ when src has no time part
+				else if(duration < 60)       asprintf(&tmp, "%.0f seconds ago", duration);
+				else if(duration < 90)       asprintf(&tmp, "a minute ago");
+				else if(duration < 3570)     asprintf(&tmp, "%.0f minutes ago", duration/60);
+				else if(duration < 5400)     asprintf(&tmp, "an hour ago");
+				else if(duration < 84600)    asprintf(&tmp, "%.0f hours ago", duration/(60*60));
+				else if(duration < 129600)   asprintf(&tmp, "a day ago");
+				else if(duration < 561600)   asprintf(&tmp, "%.0f days ago", duration/(24*60*60));
+				else if(duration < 1036800)  asprintf(&tmp, "a week ago");
+				else if(duration < 2419200)  asprintf(&tmp, "%.0f weeks ago", duration/(7*24*60*60));
+				else if(duration < 3952800)  asprintf(&tmp, "a month ago");
+				else if(duration < 30304800) asprintf(&tmp, "%.0f months ago", duration/(30.5*24*60*60));
+				else if(duration < 47304000) asprintf(&tmp, "a year ago");
+				else asprintf(&tmp, "%.0f years ago", duration/(365*24*60*60));
+
+				std::string res = tmp;
+				free(tmp);
+				return res;
+			}
+		}
+		return src;
+	}
+
+	static std::string format_number (std::string const& src)
+	{
+		return format_string::replace(src, "(\\d+)(\\.\\d+)?", "${1/\\d{1,3}(?=\\d{3}+(?!\\d))/$0,/g}${2}");
+	}
+
+	static std::string format_duration (std::string const& src)
+	{
+		try {
+			double seconds = std::stod(src); // This may throw an exception
+			double minutes = round(seconds / 60);
+			struct { char const* singular; char const* plural; size_t amount; } units[] = {
+				{ "day",    "days",    (size_t)(minutes / 60 / 24) },
+				{ "hour",   "hours",   (size_t)(minutes / 60) % 24 },
+				{ "minute", "minutes", (size_t)(minutes) % 60      },
+			};
+
+			std::vector<std::string> v;
+			for(auto const& unit : units)
+			{
+				if(unit.amount)
+					v.emplace_back(text::format("%zu %s", unit.amount, unit.amount == 1 ? unit.singular : unit.plural));
+			}
+			return text::join(v, ", ");
+		}
+		catch (...) {
+		}
+		return src;
+	}
+
 	void operator() (parser::variable_change_t const& v)
 	{
-		std::map<std::string, std::string>::const_iterator it = variable(v.name);
-		if(it != variables.end())
+		std::string value = variable(v.name, NULL_STR);
+		if(value != NULL_STR)
 		{
-			std::string value = it->second;
 			if(v.change & parser::transform::kUpcase)
 				value = text::uppercase(value);
 			if(v.change & parser::transform::kDowncase)
@@ -183,6 +281,30 @@ struct expand_visitor : boost::static_visitor<void>
 				value = capitalize(value);
 			if(v.change & parser::transform::kAsciify)
 				value = asciify(value);
+			if(v.change & parser::transform::kUrlEncode)
+				value = encode::url_part(value);
+			if(v.change & parser::transform::kShellEscape)
+				value = shell_escape(value);
+			if(v.change & parser::transform::kRelative)
+				value = relative_time(value);
+			if(v.change & parser::transform::kNumber)
+				value = format_number(value);
+			if(v.change & parser::transform::kDuration)
+				value = format_duration(value);
+
+#if defined(MAC_OS_X_VERSION_10_12) && (MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_12)
+			if(dirname_r != nullptr && (v.change & parser::transform::kDirname))
+			{
+				char buf[MAXPATHLEN];
+				value = dirname_r(value.c_str(), buf) ?: value;
+			}
+
+			if(basename_r != nullptr && (v.change & parser::transform::kBasename))
+			{
+				char buf[MAXPATHLEN];
+				value = basename_r(value.c_str(), buf) ?: value;
+			}
+#endif
 			res += value;
 		}
 	}
@@ -231,7 +353,7 @@ struct expand_visitor : boost::static_visitor<void>
 		std::vector<std::string> all_choices;
 		for(auto const& it : v.choices)
 		{
-			expand_visitor tmp(variables, callback);
+			expand_visitor tmp(variable, callback);
 			tmp.traverse(it);
 			tmp.handle_case_changes();
 			all_choices.push_back(tmp.res);
@@ -247,7 +369,7 @@ struct expand_visitor : boost::static_visitor<void>
 	{
 		if(callback)
 		{
-			std::string const& str = callback->run_command(v.code, variables);
+			std::string const& str = callback->run_command(v.code);
 			res.insert(res.end(), str.begin(), !str.empty() && str.back() == '\n' ? --str.end() : str.end());
 		}
 	}
@@ -268,9 +390,9 @@ namespace format_string
 		nodes = std::make_shared<parser::nodes_t>(n);
 	}
 
-	std::string format_string_t::expand (std::map<std::string, std::string> const& variables) const
+	std::string format_string_t::expand (std::function<std::string(std::string const&, std::string const&)> const& getVariable) const
 	{
-		expand_visitor v(variables, nullptr);
+		expand_visitor v(getVariable, nullptr);
 		v.traverse(*nodes);
 		v.handle_case_changes();
 		return v.res;
@@ -284,17 +406,31 @@ namespace format_string
 	{
 		D(DBF_FormatString, bug("%s\n", src.c_str()););
 
-		expand_visitor v(variables, nullptr);
+		auto getVariable = [&variables](std::string const& name, std::string const& fallback) -> std::string {
+			auto it = variables.find(name);
+			return it != variables.end() ? it->second : fallback;
+		};
+
+		expand_visitor v(getVariable, nullptr);
 		v.replace(src, ptrn, *format.nodes, repeat);
 		v.handle_case_changes();
 		return v.res;
 	}
 
-	std::string expand (std::string const& format, std::map<std::string, std::string> const& variables)
+	std::string expand (std::string const& format, std::function<std::string(std::string const&, std::string const&)> const& getVariable)
 	{
 		if(format.find_first_of("$(\\") == std::string::npos)
 			return format;
-		return format_string_t(format).expand(variables);
+		return format_string_t(format).expand(getVariable);
+	}
+
+	std::string expand (std::string const& format, std::map<std::string, std::string> const& variables)
+	{
+		auto getVariable = [&variables](std::string const& name, std::string const& fallback) -> std::string {
+			auto it = variables.find(name);
+			return it != variables.end() ? it->second : fallback;
+		};
+		return expand(format, getVariable);
 	}
 
 	std::string escape (std::string const& format)
@@ -329,7 +465,12 @@ namespace snippet
 {
 	snippet_t parse (std::string const& str, std::map<std::string, std::string> const& variables, std::string const& indentString, text::indent_t const& indent, run_command_callback_t* callback)
 	{
-		expand_visitor v(variables, callback);
+		auto getVariable = [&variables](std::string const& name, std::string const& fallback) -> std::string {
+			auto it = variables.find(name);
+			return it != variables.end() ? it->second : fallback;
+		};
+
+		expand_visitor v(getVariable, callback);
 		v.traverse(parser::parse_snippet(str));
 		v.handle_case_changes();
 

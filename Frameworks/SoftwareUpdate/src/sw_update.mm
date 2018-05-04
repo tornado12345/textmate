@@ -4,6 +4,7 @@
 #include <io/entries.h>
 #include <text/decode.h>
 #include <text/trim.h>
+#include <ns/ns.h>
 #include <OakSystem/application.h>
 #include <oak/compat.h>
 
@@ -107,21 +108,26 @@ namespace sw_update
 {
 	version_info_t download_info (std::string const& url, std::string* error)
 	{
+		network::header_t contentType("content-type");
 		network::save_t archiver;
-		long res = network::download(network::request_t(url, &archiver, nullptr), error);
+		long res = network::download(network::request_t(url, &contentType, &archiver, nullptr), error);
 		if(res == 200)
 		{
-			plist::dictionary_t const& plist = plist::load(archiver.path);
+			NSDictionary* plist;
+			if(contentType.value() == "application/json")
+					plist = [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:to_ns(archiver.path)] options:0 error:nullptr];
+			else	plist = [NSDictionary dictionaryWithContentsOfFile:to_ns(archiver.path)];
 
-			std::string version, archive;
-			if(plist::get_key_path(plist, "version", version) && plist::get_key_path(plist, "url", archive))
+			if(plist)
 			{
-				return version_info_t(text::trim(version), archive);
+				NSString* version = plist[@"version"];
+				NSString* url     = plist[@"url"];
+				if(version && url)
+					return version_info_t(text::trim(to_s(version)), to_s(url));
 			}
-			else if(error)
-			{
-				*error = "Unexpected body received from server.";
-			}
+
+			if(error)
+				*error = "Unexpected content received from server.";
 		}
 		else if(res != 0 && error)
 		{
@@ -132,8 +138,10 @@ namespace sw_update
 
 	std::string download_update (std::string const& url, key_chain_t const& keyChain, std::string* error, double* progress, bool const* stopFlag)
 	{
+		NSString* const bundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
+
 		std::string dummy;
-		std::string const path = path::join({ path::home(), "Library/Caches/com.macromates.TextMate", path::name(url) });
+		std::string const path = path::join({ path::home(), "Library/Caches", to_s(bundleIdentifier), path::name(url) });
 		return network::download_tbz(url, keyChain, path, error ? *error : dummy, progress, 0, 1, stopFlag);
 	}
 

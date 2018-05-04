@@ -543,8 +543,14 @@ static bool is_binary (std::string const& path)
 - (NSArray*)selectedItems
 {
 	NSIndexSet* indexSet = [_outlineView selectedRowIndexes];
-	NSInteger clickedRow = [_outlineView clickedRow];
-	indexSet = clickedRow == -1 || clickedRow >= _outlineView.numberOfRows || [indexSet containsIndex:clickedRow] ? indexSet : [NSIndexSet indexSetWithIndex:clickedRow];
+
+	NSEvent* currentEvent = [NSApp currentEvent];
+	if(currentEvent.type != NSKeyDown && currentEvent.type != NSKeyUp)
+	{
+		NSInteger clickedRow = [_outlineView clickedRow];
+		if(0 <= clickedRow && clickedRow < _outlineView.numberOfRows && ![indexSet containsIndex:clickedRow])
+			indexSet = [NSIndexSet indexSetWithIndex:clickedRow];
+	}
 
 	NSMutableArray* res = [NSMutableArray array];
 	for(NSUInteger index = [indexSet firstIndex]; index != NSNotFound; index = [indexSet indexGreaterThanIndex:index])
@@ -758,6 +764,20 @@ static bool is_binary (std::string const& path)
 	[self writeSelectionToPasteboard:[NSPasteboard generalPasteboard] types:nil];
 }
 
+- (void)copyAsPathname:(id)sender
+{
+	NSMutableArray* pathnames = [NSMutableArray array];
+	for(NSURL* url in self.selectedURLs)
+	{
+		if([url isFileURL])
+			[pathnames addObject:[url path]];
+	}
+
+	NSPasteboard* pboard = [NSPasteboard generalPasteboard];
+	[pboard clearContents];
+	[pboard writeObjects:pathnames];
+}
+
 - (BOOL)canPaste
 {
 	return [_url isFileURL] && [[[NSPasteboard generalPasteboard] availableTypeFromArray:@[ NSFilenamesPboardType ]] isEqualToString:NSFilenamesPboardType];
@@ -910,7 +930,13 @@ static bool is_binary (std::string const& path)
 		[aMenu addItem:[NSMenuItem separatorItem]];
 
 		if(hasFileSelected)
+		{
 			[aMenu addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@""];
+
+			NSMenuItem* copyPathnameItem = [aMenu addItemWithTitle:@"Copy As Pathname" action:@selector(copyAsPathname:) keyEquivalent:@""];
+			copyPathnameItem.keyEquivalentModifierMask = NSAlternateKeyMask;
+			copyPathnameItem.alternate = YES;
+		}
 
 		if(self.canPaste)
 		{
@@ -1143,7 +1169,7 @@ static bool is_binary (std::string const& path)
 	[panel setAllowsMultipleSelection:NO];
 	[panel setDirectoryURL:[_url isFileURL] ? _url : nil];
 	[panel beginSheetModalForWindow:_view.window completionHandler:^(NSInteger result) {
-		if(result == NSOKButton)
+		if(result == NSFileHandlingPanelOKButton)
 			[self goToURL:[[panel URLs] lastObject]];
 	}];
 }
@@ -1262,11 +1288,13 @@ static bool is_binary (std::string const& path)
 	}
 
 	NSString* quickLookTitle = [QLPreviewPanel sharedPreviewPanelExists] && [[QLPreviewPanel sharedPreviewPanel] isVisible] ? @"Close Quick Look" : @"Quick Look%@";
+	NSString* copyAsPathnameTitle = selectedFiles > 1 ? @"Copy%@ as Pathnames" : @"Copy%@ as Pathname";
 
 	struct { NSString* format; SEL action; } const menuTitles[] =
 	{
 		{ @"Cut%@",                   @selector(cut:)                                },
 		{ @"Copy%@",                  @selector(copy:)                               },
+		{ copyAsPathnameTitle,        @selector(copyAsPathname:)                     },
 		{ quickLookTitle,             @selector(toggleQuickLookPreview:)             },
 		{ @"Show%@ in Finder",        @selector(showSelectedEntriesInFinder:)        },
 		{ @"Add%@ to Favorites",      @selector(addSelectedEntriesToFavorites:)      },

@@ -1,6 +1,5 @@
 #import "EncodingView.h"
 #import <OakFoundation/NSString Additions.h>
-#import <OakAppKit/OakAppKit.h>
 #import <OakAppKit/OakEncodingPopUpButton.h>
 #import <OakAppKit/OakUIConstructionFunctions.h>
 #import <text/hexdump.h>
@@ -158,8 +157,7 @@ static NSTextView* MyCreateTextView ()
 @interface EncodingWindowController () <NSWindowDelegate, NSTextViewDelegate>
 {
 	OBJC_WATCH_LEAKS(EncodingWindowController);
-	char const* first;
-	char const* last;
+	NSData* _data;
 }
 @property (nonatomic) NSObjectController* objectController;
 @property (nonatomic) NSTextField* title;
@@ -176,13 +174,11 @@ static NSTextView* MyCreateTextView ()
 @end
 
 @implementation EncodingWindowController
-- (id)initWithFirst:(char const*)firstPointer last:(char const*)lastPointer
+- (instancetype)initWithData:(NSData*)data
 {
 	if(self = [super initWithWindow:[[NSWindow alloc] initWithContentRect:NSZeroRect styleMask:(NSTitledWindowMask|NSClosableWindowMask|NSResizableWindowMask|NSMiniaturizableWindowMask) backing:NSBackingStoreBuffered defer:NO]])
 	{
-		first = firstPointer;
-		last  = std::min(firstPointer + 256*1024, lastPointer);
-
+		_data            = data;
 		_encoding        = @"ISO-8859-1";
 		_displayName     = @"untitled";
 		_trainClassifier = YES;
@@ -204,6 +200,7 @@ static NSTextView* MyCreateTextView ()
 
 		self.scrollView.hasVerticalScroller   = YES;
 		self.scrollView.hasHorizontalScroller = YES;
+		self.scrollView.autohidesScrollers    = YES;
 		self.scrollView.borderType            = NSBezelBorder;
 		self.scrollView.documentView          = self.textView;
 
@@ -236,7 +233,7 @@ static NSTextView* MyCreateTextView ()
 - (void)beginSheetModalForWindow:(NSWindow*)aWindow completionHandler:(void(^)(NSModalResponse))callback
 {
 	[self.window layoutIfNeeded];
-	OakShowSheetForWindow(self.window, aWindow, callback);
+	[aWindow beginSheet:self.window completionHandler:callback];
 }
 
 - (BOOL)textView:(NSTextView*)aTextView doCommandBySelector:(SEL)aSelector
@@ -293,7 +290,8 @@ static NSTextView* MyCreateTextView ()
 - (void)updateTextView
 {
 	bool couldConvert = true;
-	[[self.textView textStorage] setAttributedString:convert_and_highlight(first, last, to_s(self.encoding), "UTF-8", &couldConvert)];
+	char const* bytes = (char const*)_data.bytes;
+	[[self.textView textStorage] setAttributedString:convert_and_highlight(bytes, bytes + MIN(_data.length, 256*1024), to_s(self.encoding), "UTF-8", &couldConvert)];
 	self.acceptableEncoding = couldConvert;
 }
 
@@ -313,15 +311,13 @@ static NSTextView* MyCreateTextView ()
 
 - (IBAction)performOpenDocument:(id)sender
 {
-	[self.window orderOut:self];
-	[NSApp endSheet:self.window returnCode:NSRunStoppedResponse];
+	[self.window.sheetParent endSheet:self.window returnCode:NSModalResponseOK];
 	[self cleanup];
 }
 
 - (IBAction)performCancelOperation:(id)sender
 {
-	[self.window orderOut:self];
-	[NSApp endSheet:self.window returnCode:NSRunAbortedResponse];
+	[self.window.sheetParent endSheet:self.window returnCode:NSModalResponseCancel];
 	[self cleanup];
 }
 @end

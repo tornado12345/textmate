@@ -2,6 +2,30 @@ Title: Release Notes
 
 # Changes
 
+## 2018-04-02 (v2.0-rc.9)
+
+* TextMate’s QuickLook plug-in no longer claims `public.data` (files without extension). The idea was to support previewing files like `README` but a side-effect was that TextMate’s QuickLook plug-in became responsible for generating thumbnails for all binary files without a dedicated QuickLook plug-in (e.g. disk images or zip archives). There appears to be no way to dynamically opt out of thumbnail generation, therefor we’ve had to remove support for previewing files without extension.
+* See [all changes since v2.0-rc.8](https://github.com/textmate/textmate/compare/v2.0-rc.8...v2.0-rc.9)
+
+## 2018-03-08 (v2.0-rc.8)
+
+* You can now set `tabTitle` in `.tm_properties` to change the title of tabs (defaults to `$TM_DISPLAYNAME`) *[Jake Kirshner]*
+* Holding option (⌥) when showing the file browser’s context menu will change “Copy «file»” to “Copy «file» as Pathname”. *[Ronald Wampler]*
+* Bundle commands that show untrusted content in the HTML output window can now set `disableJavaScriptAPI` to `true` in their `tmCommand` property list to disable the JavaScript API normally exposed in the HTML output window. This is set for _HTML → Show Preview_.
+* Added some new format string transformations, [see this commit for details](https://github.com/textmate/textmate/commit/107a56e12dcd074ae62898548dd22e7487f7e859). Though this build does not support `dirname` nor `basename`.
+* See [all changes since v2.0-rc.5](https://github.com/textmate/textmate/compare/v2.0-rc.5...v2.0-rc.8)
+
+## 2016-12-03 (v2.0-rc.5)
+
+* Fix slowdown when editing files on high-latency file systems.
+* Don’t add non-existing files to Open Recent menu, as they will result in duplicates. *[Ronald Wampler]*
+* See [all changes since v2.0-rc.4](https://github.com/textmate/textmate/compare/v2.0-rc.4...v2.0-rc.5)
+
+## 2016-11-18 (v2.0-rc.4)
+
+* Fixes/improvements.
+* See [all changes since v2.0-rc.1](https://github.com/textmate/textmate/compare/v2.0-rc.1...v2.0-rc.4)
+
 ## 2016-11-11 (v2.0-rc.1)
 
 * Removed beta from version string (and miscellaneous fixes/improvements).

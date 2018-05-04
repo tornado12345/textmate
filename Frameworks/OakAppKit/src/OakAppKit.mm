@@ -13,75 +13,19 @@ void OakRunIOAlertPanel (char const* format, ...)
 	char* buf = NULL;
 	vasprintf(&buf, format, ap);
 	va_end(ap);
-	NSRunAlertPanel(@(buf), @"Error: %s", @"OK", nil, nil, strerror(errno));
+
+	NSAlert* alert        = [[NSAlert alloc] init];
+	alert.messageText     = @(buf);
+	alert.informativeText = [NSString stringWithFormat:@"Error: %s", strerror(errno)];
+	[alert addButtonWithTitle:@"OK"];
+	[alert runModal];
+
 	free(buf);
 }
 
 BOOL OakIsAlternateKeyOrMouseEvent (NSUInteger flags, NSEvent* anEvent)
 {
 	return ([anEvent type] == NSLeftMouseUp || [anEvent type] == NSOtherMouseUp || [anEvent type] == NSKeyDown) && (([anEvent modifierFlags] & flags) == flags);
-}
-
-@interface OakSheetCallbackDelegate : NSObject
-@property (nonatomic, copy) void(^callback)(NSInteger);
-@property (nonatomic)       id retainedSelf;
-@end
-
-@implementation OakSheetCallbackDelegate
-- (id)initWithBlock:(void(^)(NSInteger))aBlock
-{
-	if(self = [super init])
-	{
-		self.callback = aBlock;
-		self.retainedSelf = self;
-	}
-	return self;
-}
-
-- (void)sheetDidEnd:(id)sheetOrAlert returnCode:(NSInteger)returnCode contextInfo:(void*)unused
-{
-	self.callback(returnCode);
-	self.retainedSelf = nil;
-}
-@end
-
-void OakShowSheetForWindow (NSWindow* sheet, NSWindow* window, void(^callback)(NSInteger))
-{
-	if(!window)
-	{
-		callback([NSApp runModalForWindow:sheet]);
-		return;
-	}
-
-	crash_reporter_info_t info(to_s([NSString stringWithFormat:@"sheet %@, window %@: title ‘%@’, is visible %s, is sheet %s, has sheet %s, delegate %@", sheet, window, window.title, BSTR(window.isVisible), BSTR(window.isSheet), BSTR(window.attachedSheet), window.delegate]));
-	OakSheetCallbackDelegate* delegate = [[OakSheetCallbackDelegate alloc] initWithBlock:callback];
-	[NSApp beginSheet:sheet modalForWindow:window modalDelegate:delegate didEndSelector:@selector(sheetDidEnd:returnCode:contextInfo:) contextInfo:NULL];
-}
-
-void OakShowAlertForWindow (NSAlert* alert, NSWindow* window, void(^callback)(NSInteger))
-{
-	if(window && [alert respondsToSelector:@selector(beginSheetModalForWindow:completionHandler:)]) // MAC_OS_X_VERSION_10_9
-	{
-		[alert beginSheetModalForWindow:window completionHandler:callback];
-		return;
-	}
-
-	OakSheetCallbackDelegate* delegate = [[OakSheetCallbackDelegate alloc] initWithBlock:callback];
-	if(window.attachedSheet)
-	{
-		__weak __block id observerId = [[NSNotificationCenter defaultCenter] addObserverForName:NSWindowDidEndSheetNotification object:window queue:nil usingBlock:^(NSNotification*){
-			[[NSNotificationCenter defaultCenter] removeObserver:observerId];
-			OakShowAlertForWindow(alert, window, callback);
-		}];
-	}
-	else if(window)
-	{
-		[alert beginSheetModalForWindow:window modalDelegate:delegate didEndSelector:@selector(sheetDidEnd:returnCode:contextInfo:) contextInfo:NULL];
-	}
-	else
-	{
-		[delegate sheetDidEnd:alert returnCode:[alert runModal] contextInfo:NULL];
-	}
 }
 
 // ======================
@@ -119,14 +63,45 @@ NSUInteger const OakMoveNoActionReturn = 3;
 				row = (row + numberOfRows) % numberOfRows;
 		else	row = oak::cap((NSInteger)0, row, numberOfRows - 1);
 
-		[_tableView selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:extend && _tableView.allowsMultipleSelection];
+		if([_tableView.delegate respondsToSelector:@selector(tableView:shouldSelectRow:)])
+		{
+			while(0 <= row && row < numberOfRows)
+			{
+				if([_tableView.delegate tableView:_tableView shouldSelectRow:row])
+					break;
+				row += anOffset > 0 ? +1 : -1;;
+			}
+
+			if(row < 0 || row >= numberOfRows)
+				row = [_tableView selectedRow];
+		}
+
+		NSIndexSet* indexes = [NSIndexSet indexSetWithIndex:row];
+		if(std::abs(anOffset) > 1 && extend && _tableView.allowsMultipleSelection)
+		{
+			NSIndexSet* selected = [_tableView selectedRowIndexes];
+			NSInteger selectedRow = anOffset < 0 ? [selected firstIndex] : [selected lastIndex];
+
+			NSInteger min = MIN(selectedRow, row);
+			NSInteger max = MAX(selectedRow, row);
+			indexes = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(min, max - min + 1)];
+
+			if([_tableView.delegate respondsToSelector:@selector(tableView:shouldSelectRow:)])
+			{
+				indexes = [indexes indexesPassingTest:^BOOL(NSUInteger index, BOOL* stop){
+					return [_tableView.delegate tableView:_tableView shouldSelectRow:index];
+				}];
+			}
+		}
+
+		[_tableView selectRowIndexes:indexes byExtendingSelection:extend && _tableView.allowsMultipleSelection];
 		[_tableView scrollRowToVisible:row];
 
 		self.returnCode = OakMoveMoveReturn;
 	}
 }
 
-- (int)visibleRows                                      { return (int)floor(NSHeight([_tableView visibleRect]) / ([_tableView rowHeight]+[_tableView intercellSpacing].height)) - 1; }
+- (NSInteger)visibleRows                                { return (NSInteger)floor(NSHeight([_tableView visibleRect]) / ([_tableView rowHeight]+[_tableView intercellSpacing].height)) - 1; }
 
 - (void)moveUp:(id)sender                               { [self moveSelectedRowByOffset:-1 extendingSelection:NO];  }
 - (void)moveDown:(id)sender                             { [self moveSelectedRowByOffset:+1 extendingSelection:NO];  }

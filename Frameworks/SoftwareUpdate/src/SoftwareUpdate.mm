@@ -3,6 +3,7 @@
 #import "sw_update.h"
 #import <version/version.h>
 #import <OakAppKit/OakAppKit.h>
+#import <OakAppKit/NSAlert Additions.h>
 #import <OakAppKit/OakSound.h>
 #import <OakAppKit/NSMenu Additions.h>
 #import <OakFoundation/NSDate Additions.h>
@@ -34,8 +35,15 @@ struct shared_state_t
 typedef std::shared_ptr<shared_state_t> shared_state_ptr;
 
 @interface SoftwareUpdate ()
+{
+	key_chain_t keyChain;
+	NSTimeInterval pollInterval;
+
+	shared_state_ptr sharedState;
+	CGFloat secondsLeft;
+}
 @property (nonatomic) NSDate* lastPoll;
-@property (nonatomic) BOOL isChecking;
+@property (nonatomic, readwrite, getter = isChecking) BOOL checking;
 @property (nonatomic) NSString* lastVersionDownloaded;
 @property (nonatomic) NSString* errorString;
 @property (nonatomic) NSTimer* pollTimer;
@@ -47,14 +55,6 @@ typedef std::shared_ptr<shared_state_t> shared_state_ptr;
 @end
 
 @implementation SoftwareUpdate
-{
-	key_chain_t keyChain;
-	NSTimeInterval pollInterval;
-
-	shared_state_ptr sharedState;
-	CGFloat secondsLeft;
-}
-
 + (instancetype)sharedInstance
 {
 	static SoftwareUpdate* sharedInstance = [self new];
@@ -88,7 +88,7 @@ typedef std::shared_ptr<shared_state_t> shared_state_ptr;
 	self.pollTimer = nil;
 
 	struct statfs sfsb;
-	BOOL readOnlyFileSystem = statfs(oak::application_t::path().c_str(), &sfsb) != 0 || (sfsb.f_flags & MNT_RDONLY);
+	BOOL readOnlyFileSystem = statfs([NSBundle mainBundle].bundlePath.fileSystemRepresentation, &sfsb) != 0 || (sfsb.f_flags & MNT_RDONLY);
 	BOOL disablePolling = [[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsDisableSoftwareUpdatesKey];
 	D(DBF_SoftwareUpdate_Check, bug("download visible %s, disable polling %s, read only file system %s → %s\n", BSTR(self.downloadWindow), BSTR(disablePolling), BSTR(readOnlyFileSystem), BSTR(!self.downloadWindow && !disablePolling && !readOnlyFileSystem)););
 	if(_downloadWindow.isWorking || disablePolling || readOnlyFileSystem)
@@ -134,7 +134,7 @@ typedef std::shared_ptr<shared_state_t> shared_state_ptr;
 {
 	if(self.isChecking)
 		return;
-	self.isChecking = YES;
+	self.checking = YES;
 
 	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
 		std::string error = NULL_STR;
@@ -143,12 +143,19 @@ typedef std::shared_ptr<shared_state_t> shared_state_ptr;
 		dispatch_async(dispatch_get_main_queue(), ^{
 			self.errorString = [NSString stringWithCxxString:error];
 			self.lastPoll    = [NSDate date];
-			self.isChecking  = NO;
+			self.checking    = NO;
 
 			if(self.errorString)
 			{
 				if(!backgroundFlag)
-					NSRunInformationalAlertPanel(@"Error checking for new version", @"%@", @"Continue", nil, nil, self.errorString);
+				{
+					NSAlert* alert        = [[NSAlert alloc] init];
+					alert.alertStyle      = NSAlertStyleInformational;
+					alert.messageText     = @"Error checking for new version";
+					alert.informativeText = self.errorString;
+					[alert addButtonWithTitle:@"Continue"];
+					[alert runModal];
+				}
 			}
 			else if(info.version != NULL_STR && info.url != NULL_STR)
 			{
@@ -159,24 +166,41 @@ typedef std::shared_ptr<shared_state_t> shared_state_ptr;
 
 				if(version::equal(info.version, to_s(version)) && !backgroundFlag)
 				{
-					NSInteger choice = NSRunInformationalAlertPanel(@"Up To Date", @"%@ is the latest version available—you have version %@.", @"Continue", nil, redownloadFlag ? @"Redownload" : nil, newVersion, version);
-					if(choice == NSAlertOtherReturn) // “Redownload”
+					NSAlert* alert        = [[NSAlert alloc] init];
+					alert.alertStyle      = NSAlertStyleInformational;
+					alert.messageText     = @"Up To Date";
+					alert.informativeText = [NSString stringWithFormat:@"%@ is the latest version available—you have version %@.", newVersion, version];
+					[alert addButtonWithTitle:@"Continue"];
+					if(redownloadFlag)
+						[alert addButtonWithTitle:@"Redownload"];
+
+					if([alert runModal] == NSAlertSecondButtonReturn) // “Redownload”
 						downloadAndInstall = YES;
 				}
 				else if(version::less(info.version, to_s(version)) && !backgroundFlag)
 				{
-					NSInteger choice = NSRunInformationalAlertPanel(@"Up To Date", @"%@ is the latest version available—you have version %@.", @"Continue", nil, @"Downgrade", newVersion, version);
-					if(choice == NSAlertOtherReturn) // “Downgrade”
+					NSAlert* alert        = [[NSAlert alloc] init];
+					alert.alertStyle      = NSAlertStyleInformational;
+					alert.messageText     = @"Up To Date";
+					alert.informativeText = [NSString stringWithFormat:@"%@ is the latest version available—you have version %@.", newVersion, version];
+					[alert addButtons:@"Continue", @"Downgrade", nil];
+					if([alert runModal] == NSAlertSecondButtonReturn) // “Downgrade”
 						downloadAndInstall = YES;
 				}
 				else if(version::less(to_s(version), info.version))
 				{
 					if(!backgroundFlag || [[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsAskBeforeUpdatingKey])
 					{
-						NSInteger choice = NSRunInformationalAlertPanel(@"New Version Available", @"%@ is now available—you have version %@. Would you like to download it now?", @"Download & Install", nil, @"Later", newVersion, version);
-						if(choice == NSAlertDefaultReturn) // “Download & Install”
+						NSAlert* alert        = [[NSAlert alloc] init];
+						alert.alertStyle      = NSAlertStyleInformational;
+						alert.messageText     = @"New Version Available";
+						alert.informativeText = [NSString stringWithFormat: @"%@ is now available—you have version %@. Would you like to download it now?", newVersion, version];
+						[alert addButtons:@"Download & Install", @"Later", nil];
+
+						NSModalResponse choice = [alert runModal];
+						if(choice == NSAlertFirstButtonReturn) // “Download & Install”
 							downloadAndInstall = YES;
-						else if(choice == NSAlertOtherReturn) // “Later”
+						else if(choice == NSAlertSecondButtonReturn) // “Later”
 							[[NSUserDefaults standardUserDefaults] setObject:[[NSDate date] dateByAddingTimeInterval:24*60*60] forKey:kUserDefaultsSoftwareUpdateSuspendUntilKey];
 					}
 					else if(version::less(to_s(self.lastVersionDownloaded), info.version))
@@ -315,7 +339,8 @@ typedef std::shared_ptr<shared_state_t> shared_state_ptr;
 	if(err == NULL_STR)
 	{
 		self.downloadWindow.activityText = @"Relaunching…";
-		oak::application_t::relaunch();
+		NSString* args = [NSString stringWithFormat:@"-disableSessionRestore NO -didUpdateFrom '%@'", [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"]];
+		oak::application_t::relaunch([args UTF8String]);
 	}
 	else
 	{

@@ -9,12 +9,11 @@ PUBLIC @interface OakPasteboardSelector : NSWindowController
 	OakPasteboardSelectorTableViewHelper* tableViewHelper;
 }
 + (instancetype)sharedInstance;
-- (void)setIndex:(unsigned)index;
+- (void)setIndex:(NSUInteger)index;
 - (void)setEntries:(NSArray*)entries;
 
-- (unsigned)showAtLocation:(NSPoint)aLocation;
+- (NSInteger)showAtLocation:(NSPoint)aLocation;
 - (void)setWidth:(CGFloat)width;
 - (void)setPerformsActionOnSingleClick;
-- (BOOL)shouldSendAction;
 - (NSArray*)entries;
 @end

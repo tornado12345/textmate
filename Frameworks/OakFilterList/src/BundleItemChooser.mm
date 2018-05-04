@@ -227,7 +227,7 @@ _OutputIter copy_menu_items (NSMenu* menu, _OutputIter out, NSArray* parentNames
 							title = [title stringByAppendingString:@" (•)"];
 					else	title = [title stringByAppendingString:@" (✓)"];
 				}
-				*out++ = { to_s(title), to_s([parentNames componentsJoinedByString:@" ▸ "]), item };
+				*out++ = { to_s(title), to_s([parentNames componentsJoinedByString:@" ‣ "]), item };
 			}
 		}
 
@@ -579,7 +579,12 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 	[constraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(24)-[status]-[edit]-[select]-|"                options:NSLayoutFormatAlignAllCenterY metrics:nil views:views]];
 	[constraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|-(2)-[searchField]-(8)-[aboveScopeBarDark][aboveScopeBarLight]-(3)-[scopeBar]-(4)-[topDivider][scrollView(>=50)][bottomDivider]-(4)-[select]-(5)-|" options:0 metrics:nil views:views]];
 
-	[self.window.contentView addConstraints:constraints];
+	NSView* contentView = self.window.contentView;
+	[constraints addObject:[NSLayoutConstraint constraintWithItem:_aboveScopeBarLight attribute:NSLayoutAttributeLeft relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeLeft multiplier:1.0 constant:0.0]];
+	[constraints addObject:[NSLayoutConstraint constraintWithItem:_topDivider         attribute:NSLayoutAttributeLeft relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeLeft multiplier:1.0 constant:0.0]];
+	[constraints addObject:[NSLayoutConstraint constraintWithItem:_bottomDivider      attribute:NSLayoutAttributeLeft relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeLeft multiplier:1.0 constant:0.0]];
+
+	[contentView addConstraints:constraints];
 	self.layoutConstraints = constraints;
 
 	OakSetupKeyViewLoop(@[ (self.keyEquivalentInput ? self.keyEquivalentView : self.searchField), self.actionsPopUpButton, self.scopeBar, self.editButton, self.selectButton ]);
@@ -752,9 +757,9 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 			{
 				std::string suffix;
 				if(bundleItem->kind() == bundles::kItemTypeGrammar)
-					suffix = " ▸ Language Grammars";
+					suffix = " ‣ Language Grammars";
 				else if(bundleItem->kind() == bundles::kItemTypeTheme)
-					suffix = " ▸ Themes";
+					suffix = " ‣ Themes";
 
 				ActionItem* item = [[ActionItem alloc] init];
 				item.itemName      = to_ns(name);
@@ -778,7 +783,7 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 							ActionItem* item = [[ActionItem alloc] init];
 							item.itemName      = to_ns(pair.first);
 							item.value         = to_ns(format(pair.second));
-							item.location      = to_ns(path + " ▸ " + name);
+							item.location      = to_ns(path + " ‣ " + name);
 							item.uuid          = uuid;
 							item.eclipsed      = !self.searchAllScopes && !previousSettings.insert(pair.first).second ? YES : NO;
 							item.scopeSelector = to_ns(to_s(bundleItem->scope_selector()));
@@ -800,7 +805,7 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 								ActionItem* item = [[ActionItem alloc] init];
 								item.itemName      = to_ns(pair.first);
 								item.value         = to_ns(format(pair.second));
-								item.location      = to_ns(path + " ▸ " + name + " ▸ " + "shellVariables");
+								item.location      = to_ns(path + " ‣ " + name + " ‣ " + "shellVariables");
 								item.uuid          = uuid;
 								item.eclipsed      = eclipsed;
 								item.scopeSelector = to_ns(to_s(bundleItem->scope_selector()));
@@ -847,7 +852,7 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 			std::set<std::string> keysSeen;
 			for(auto const& path : KeyBindingLocations)
 			{
-				std::string displayPath = path::is_child(path, oak::application_t::path()) ? "TextMate.app ▸ " + path::name(path) : path::with_tilde(path);
+				std::string displayPath = path::is_child(path, oak::application_t::path()) ? "TextMate.app ‣ " + path::name(path) : path::with_tilde(path);
 				for(auto const& pair : plist::load(path))
 				{
 					std::string key = ns::normalize_event_string(pair.first);
@@ -887,7 +892,7 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 			for(auto const& info : settings_info_for_path(to_s(self.path), self.searchAllScopes ? scope::wildcard : self.scope.right, to_s(self.directory)))
 			{
 				std::string const name = info.variable;
-				std::string const path = info.path == NULL_STR ? "TextMate.app ▸ Preferences" : (path::is_child(info.path, oak::application_t::path()) ? "TextMate.app ▸ " + path::name(info.path) : path::with_tilde(info.path)) + (info.section == NULL_STR ? "" : " ▸ " + info.section);
+				std::string const path = info.path == NULL_STR ? "TextMate.app ‣ Preferences" : (path::is_child(info.path, oak::application_t::path()) ? "TextMate.app ‣ " + path::name(info.path) : path::with_tilde(info.path)) + (info.section == NULL_STR ? "" : " ‣ " + info.section);
 
 				ActionItem* item = [[ActionItem alloc] init];
 				item.itemName = to_ns(name);

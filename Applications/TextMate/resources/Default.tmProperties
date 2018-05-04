@@ -27,6 +27,7 @@ softWrap         = true
 [ text.git-commit ]
 spellChecking    = true
 spellingLanguage = 'en'
+disableExtendedAttributes = true
 
 [ source.abnf ]
 lineEndings      = "\r\n"
@@ -53,7 +54,4 @@ tabSize          = 8
 fileType         = "text.hg-commit"
 
 [ *.go ]
-relatedFilePath  = "${TM_FILEPATH/(?=\.go$)/_test/}"
-
-[ *_test.go ]
-relatedFilePath  = "${TM_FILEPATH/_test(?=\.go$)//}"
+relatedFilePath  = "${TM_FILEPATH/(_test)?(?=\.go$)/${1:?:_test}/}"

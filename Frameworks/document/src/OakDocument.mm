@@ -7,7 +7,6 @@
 #import "merge.h"
 #import <OakFoundation/OakFoundation.h>
 #import <OakFoundation/NSString Additions.h>
-#import <OakAppKit/OakAppKit.h>
 #import <OakAppKit/OakEncodingPopUpButton.h>
 #import <OakAppKit/OakSavePanel.h>
 #import <OakAppKit/NSAlert Additions.h>
@@ -177,6 +176,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	NSHashTable* _documentEditors;
 	scm::status::type _scmStatus;
 	OakFileIconImage* _icon;
+	NSString* _cachedDisplayName;
 
 	std::unique_ptr<ng::buffer_t> _buffer;
 	std::unique_ptr<ng::detail::storage_t> _snapshot;
@@ -325,16 +325,10 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 		self.fileType   = aFileType;
 
 		[self createBuffer];
-		if([someData respondsToSelector:@selector(enumerateByteRangesUsingBlock:)]) // MAC_OS_X_VERSION_10_9
-		{
-			[someData enumerateByteRangesUsingBlock:^(void const* buf, NSRange range, BOOL*){
-				_buffer->insert(range.location, (char const*)buf, range.length);
-			}];
-		}
-		else
-		{
-			_buffer->insert(0, (char const*)[someData bytes], [someData length]);
-		}
+
+		[someData enumerateByteRangesUsingBlock:^(void const* buf, NSRange range, BOOL*){
+			_buffer->insert(range.location, (char const*)buf, range.length);
+		}];
 	}
 	return self;
 }
@@ -438,8 +432,13 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 {
 	if(_customName)
 		return _customName;
+
 	if(_path)
-		return [[NSFileManager defaultManager] displayNameAtPath:_path];
+	{
+		if(!_cachedDisplayName)
+			_cachedDisplayName = [[NSFileManager defaultManager] displayNameAtPath:_path];
+		return _cachedDisplayName;
+	}
 
 	if(self.untitledCount == 0)
 		self.untitledCount = [OakDocumentController.sharedInstance firstAvailableUntitledCount];
@@ -487,6 +486,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	_path = path;
 	_directory = nil;
 	_icon = nil;
+	_cachedDisplayName = nil;
 	self.customName = nil;
 
 	if(_observeFileSystem)
@@ -664,7 +664,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 
 - (void)updateRecentDocumentMenu
 {
-	if(_recentTrackingDisabled || !_path || _virtualPath)
+	if(_recentTrackingDisabled || !self.isOnDisk || _virtualPath)
 		return;
 
 	NSURL* url = [NSURL fileURLWithPath:_path];
@@ -709,29 +709,22 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 		{
 			[_window.attachedSheet orderOut:_self];
 
-			EncodingWindowController* controller = [[EncodingWindowController alloc] initWithFirst:content->begin() last:content->end()];
+			EncodingWindowController* controller = [[EncodingWindowController alloc] initWithData:[NSData dataWithBytesNoCopy:content->begin() length:content->size() freeWhenDone:NO]];
 			controller.displayName = _self.displayName;
 
-			__block encoding::classifier_t db;
-			static std::string const kEncodingFrequenciesPath = path::join(path::home(), "Library/Caches/com.macromates.TextMate/EncodingFrequencies.binary");
-			db.load(kEncodingFrequenciesPath);
-
 			std::multimap<double, std::string> probabilities;
-			for(auto const& charset : db.charsets())
-				probabilities.emplace(1 - db.probability(content->begin(), content->end(), charset), charset);
+			for(auto const& charset : encoding::charsets())
+				probabilities.emplace(1 - encoding::probability(content->begin(), content->end(), charset), charset);
 			if(!probabilities.empty() && probabilities.begin()->first < 1)
 				controller.encoding = [NSString stringWithCxxString:probabilities.begin()->second];
 
 			[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentWillShowAlertNotification object:_self];
 			[controller beginSheetModalForWindow:_window completionHandler:^(NSModalResponse response){
-				if(response != NSModalResponseAbort)
+				if(response != NSModalResponseCancel)
 				{
 					context->set_charset(to_s(controller.encoding));
 					if(controller.trainClassifier)
-					{
-						db.learn(content->begin(), content->end(), to_s(controller.encoding));
-						db.save(kEncodingFrequenciesPath);
-					}
+						encoding::learn(content->begin(), content->end(), to_s(controller.encoding));
 				}
 			}];
 		}
@@ -908,11 +901,11 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 
 				[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentWillShowAlertNotification object:_document];
 				NSAlert* alert = [NSAlert tmAlertWithMessageText:[NSString stringWithFormat:@"The file “%@” is locked.", _document.displayName] informativeText:@"Do you want to overwrite it anyway?" buttons:@"Overwrite", @"Cancel", nil];
-				OakShowAlertForWindow(alert, _window, ^(NSInteger returnCode){
+				[alert beginSheetModalForWindow:_window completionHandler:^(NSInteger returnCode){
 					if(returnCode == NSAlertFirstButtonReturn)
 							context->set_make_writable(true);
 					else	_cancel = true;
-				});
+				}];
 			}
 
 			void select_create_parent (std::string const& path, io::bytes_ptr content, file::save_context_ptr context)
@@ -922,11 +915,11 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 
 				[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentWillShowAlertNotification object:_document];
 				NSAlert* alert = [NSAlert tmAlertWithMessageText:[NSString stringWithFormat:@"No parent folder for “%@”.", _document.displayName] informativeText:[NSString stringWithFormat:@"Do you wish to create a folder at “%@”?", [NSString stringWithCxxString:path::with_tilde(path::parent(path))]] buttons:@"Create Folder", @"Cancel", nil];
-				OakShowAlertForWindow(alert, _window, ^(NSInteger returnCode){
+				[alert beginSheetModalForWindow:_window completionHandler:^(NSInteger returnCode){
 					if(returnCode == NSAlertFirstButtonReturn)
 							context->set_create_parent(true);
 					else	_cancel = true;
-				});
+				}];
 			}
 
 			void obtain_authorization (std::string const& path, io::bytes_ptr content, osx::authorization_t auth, file::save_context_ptr context)
@@ -950,11 +943,11 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 					NSAlert* alert = [NSAlert tmAlertWithMessageText:[NSString stringWithFormat:@"Unable to save “%@” using “%@” as encoding.", _document.displayName, to_ns(charset)] informativeText:@"Please choose another encoding:" buttons:@"Save", @"Cancel", nil];
 					OakEncodingPopUpButton* encodingPopUp = [OakEncodingPopUpButton new];
 					[alert setAccessoryView:encodingPopUp];
-					OakShowAlertForWindow(alert, _window, ^(NSInteger returnCode){
+					[alert beginSheetModalForWindow:_window completionHandler:^(NSInteger returnCode){
 						if(returnCode == NSAlertFirstButtonReturn)
 								context->set_charset(to_s(encodingPopUp.encoding));
 						else	_cancel = true;
-					});
+					}];
 					[[alert window] recalculateKeyViewLoop];
 				}
 				else
@@ -1569,14 +1562,13 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 
 			// We must postpone potential self.scmStatus = «status» when our callstack
 			// is bind:toObject:withKeyPath:options: → scmStatus → setObserveSCMStatus:
-			__weak OakDocument* weakSelf = self;
 			dispatch_async(dispatch_get_main_queue(), ^{
-				OakDocument* doc = weakSelf;
-				if(doc && doc.scmInfo)
+				if(_scmInfo)
 				{
-					doc.scmInfo->push_callback(^(scm::info_t const& info){
-						doc.scmStatus    = info.status(to_s(doc.path));
-						doc.scmVariables = info.scm_variables();
+					__weak OakDocument* weakSelf = self;
+					_scmInfo->push_callback(^(scm::info_t const& info){
+						weakSelf.scmStatus    = info.status(to_s(weakSelf.path));
+						weakSelf.scmVariables = info.scm_variables();
 					});
 				}
 			});
@@ -1696,13 +1688,9 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 			{
 				_encoding_state = kEncodingUseFallback;
 
-				encoding::classifier_t db;
-				static std::string const kEncodingFrequenciesPath = path::join(path::home(), "Library/Caches/com.macromates.TextMate/EncodingFrequencies.binary");
-				db.load(kEncodingFrequenciesPath);
-
 				std::multimap<double, std::string> probabilities;
-				for(auto const& charset : db.charsets())
-					probabilities.emplace(1 - db.probability(content->begin(), content->end(), charset), charset);
+				for(auto const& charset : encoding::charsets())
+					probabilities.emplace(1 - encoding::probability(content->begin(), content->end(), charset), charset);
 				if(!probabilities.empty() && probabilities.begin()->first < 1)
 						context->set_charset(probabilities.begin()->second);
 				else	context->set_charset("ISO-8859-1");

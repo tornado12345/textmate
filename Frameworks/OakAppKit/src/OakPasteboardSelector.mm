@@ -132,10 +132,9 @@ static size_t line_count (std::string const& text)
 {
 	NSTableView* tableView;
 	NSMutableArray* entries;
-	BOOL shouldClose;
-	BOOL shouldSendAction;
 }
 - (void)setTableView:(NSTableView*)aTableView;
+@property (nonatomic) BOOL shouldClose;
 @end
 
 @implementation OakPasteboardSelectorTableViewHelper
@@ -229,13 +228,12 @@ static size_t line_count (std::string const& text)
 
 - (void)accept:(id)sender
 {
-	shouldSendAction = entries.count > 0 ? YES : NO;
-	shouldClose = YES;
+	_shouldClose = YES;
 }
 
 - (void)cancel:(id)sender
 {
-	shouldClose = YES;
+	_shouldClose = YES;
 }
 
 - (void)doCommandBySelector:(SEL)aSelector
@@ -261,17 +259,7 @@ static size_t line_count (std::string const& text)
 
 - (void)didDoubleClickInTableView:(id)aTableView
 {
-	shouldClose = shouldSendAction = YES;
-}
-
-- (BOOL)shouldSendAction
-{
-	return shouldSendAction;
-}
-
-- (BOOL)shouldClose
-{
-	return shouldClose;
+	_shouldClose = YES;
 }
 
 - (NSArray*)entries
@@ -297,7 +285,7 @@ static size_t line_count (std::string const& text)
 	return self;
 }
 
-- (void)setIndex:(unsigned)index
+- (void)setIndex:(NSUInteger)index
 {
 	[tableView selectRowIndexes:[NSIndexSet indexSetWithIndex:index] byExtendingSelection:NO];
 }
@@ -314,7 +302,7 @@ static size_t line_count (std::string const& text)
 	return [tableViewHelper entries];
 }
 
-- (unsigned)showAtLocation:(NSPoint)aLocation
+- (NSInteger)showAtLocation:(NSPoint)aLocation
 {
 	NSWindow* parentWindow = [NSApp keyWindow];
 	NSWindow* window = [self window];
@@ -333,7 +321,7 @@ static size_t line_count (std::string const& text)
 				[window sendEvent:event];
 		else	[NSApp sendEvent:event];
 
-		if(orderOutEvent || [tableViewHelper shouldClose])
+		if(orderOutEvent || tableViewHelper.shouldClose)
 			break;
 	}
 
@@ -353,10 +341,5 @@ static size_t line_count (std::string const& text)
 - (void)setPerformsActionOnSingleClick
 {
 	[tableViewHelper setPerformsActionOnSingleClick];
-}
-
-- (BOOL)shouldSendAction
-{
-	return [tableViewHelper shouldSendAction];
 }
 @end

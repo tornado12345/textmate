@@ -5,6 +5,7 @@
 #import <OakAppKit/NSMenuItem Additions.h>
 #import <OakAppKit/OakUIConstructionFunctions.h>
 #import <OakFoundation/NSString Additions.h>
+#import <MenuBuilder/MenuBuilder.h>
 #import <bundles/bundles.h>
 #import <text/ctype.h>
 #import <ns/ns.h>
@@ -34,14 +35,6 @@ static NSButton* OakCreateImageToggleButton (NSImage* image, NSObject* accessibi
 	[res setImage:image];
 	[res setImagePosition:NSImageOnly];
 	OakSetAccessibilityLabel(res, accessibilityLabel);
-	return res;
-}
-
-static NSMenuItem* OakCreateIndentMenuItem (NSString* title, SEL action, id target)
-{
-	NSMenuItem* res = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:@""];
-	[res setTarget:target];
-	[res setIndentationLevel:1];
 	return res;
 }
 
@@ -90,18 +83,26 @@ static NSMenuItem* OakCreateIndentMenuItem (NSString* title, SEL action, id targ
 		[wrappedBundleItemsPopUpButton addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[popup]|" options:0 metrics:nil views:@{ @"popup" : self.bundleItemsPopUp }]];
 		[wrappedBundleItemsPopUpButton addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[popup]|" options:0 metrics:nil views:@{ @"popup" : self.bundleItemsPopUp }]];
 
+		NSTextField* line    = OakCreateTextField(@"Line:");
+
+		NSView* dividerOne   = OakCreateDividerImageView();
+		NSView* dividerTwo   = OakCreateDividerImageView();
+		NSView* dividerThree = OakCreateDividerImageView();
+		NSView* dividerFour  = OakCreateDividerImageView();
+		NSView* dividerFive  = OakCreateDividerImageView();
+
 		NSDictionary* views = @{
-			@"line"         : OakCreateTextField(@"Line:"),
+			@"line"         : line,
 			@"selection"    : self.selectionField,
-			@"dividerOne"   : OakCreateDividerImageView(),
+			@"dividerOne"   : dividerOne,
 			@"grammar"      : self.grammarPopUp,
-			@"dividerTwo"   : OakCreateDividerImageView(),
+			@"dividerTwo"   : dividerTwo,
 			@"items"        : wrappedBundleItemsPopUpButton,
-			@"dividerThree" : OakCreateDividerImageView(),
+			@"dividerThree" : dividerThree,
 			@"tabSize"      : self.tabSizePopUp,
-			@"dividerFour"  : OakCreateDividerImageView(),
+			@"dividerFour"  : dividerFour,
 			@"symbol"       : self.symbolPopUp,
-			@"dividerFive"  : OakCreateDividerImageView(),
+			@"dividerFive"  : dividerFive,
 			@"recording"    : self.macroRecordingButton,
 		};
 
@@ -119,6 +120,12 @@ static NSMenuItem* OakCreateIndentMenuItem (NSString* title, SEL action, id targ
 
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-10-[line]-[selection(>=50,<=225)]-8-[dividerOne]-(-2)-[grammar(>=125@400,>=50,<=225)]-5-[dividerTwo]-(-2)-[tabSize(<=102)]-4-[dividerThree]-5-[items(==30)]-4-[dividerFour]-(-2)-[symbol(>=125@450,>=50)]-5-[dividerFive]-6-[recording]-7-|" options:0 metrics:nil views:views]];
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[dividerOne(==dividerTwo,==dividerThree,==dividerFour,==dividerFive)]|" options:0 metrics:nil views:views]];
+
+		[self addConstraint:[NSLayoutConstraint constraintWithItem:dividerTwo   attribute:NSLayoutAttributeTop relatedBy:NSLayoutRelationEqual toItem:self attribute:NSLayoutAttributeTop multiplier:1.0 constant:0.0]];
+		[self addConstraint:[NSLayoutConstraint constraintWithItem:dividerThree attribute:NSLayoutAttributeTop relatedBy:NSLayoutRelationEqual toItem:self attribute:NSLayoutAttributeTop multiplier:1.0 constant:0.0]];
+		[self addConstraint:[NSLayoutConstraint constraintWithItem:dividerFour  attribute:NSLayoutAttributeTop relatedBy:NSLayoutRelationEqual toItem:self attribute:NSLayoutAttributeTop multiplier:1.0 constant:0.0]];
+		[self addConstraint:[NSLayoutConstraint constraintWithItem:dividerFive  attribute:NSLayoutAttributeTop relatedBy:NSLayoutRelationEqual toItem:self attribute:NSLayoutAttributeTop multiplier:1.0 constant:0.0]];
+
 		// Baseline align text-controls
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[line]-[selection]-(>=1)-[grammar]-(>=1)-[tabSize]-(>=1)-[symbol]" options:NSLayoutFormatAlignAllBaseline metrics:nil views:views]];
 		// Center non-text control
@@ -133,21 +140,20 @@ static NSMenuItem* OakCreateIndentMenuItem (NSString* title, SEL action, id targ
 
 - (void)setupTabSizeMenu:(id)sender
 {
-	NSMenu* tabSizeMenu = self.tabSizePopUp.menu;
-	[tabSizeMenu removeAllItems];
-	[tabSizeMenu addItemWithTitle:@"Current Indent" action:NULL keyEquivalent:@""];
-	[tabSizeMenu addItemWithTitle:@"Indent Size" action:@selector(nop:) keyEquivalent:@""];
-	for(auto size : { 2, 3, 4, 8 })
-	{
-		NSMenuItem* item = OakCreateIndentMenuItem([NSString stringWithFormat:@"%d", size], @selector(takeTabSizeFrom:), self.target);
-		[item setTag:size];
-		[tabSizeMenu addItem:item];
-	}
-	[tabSizeMenu addItem:OakCreateIndentMenuItem(@"Other…", @selector(showTabSizeSelectorPanel:), self.target)];
-	[tabSizeMenu addItem:[NSMenuItem separatorItem]];
-	[[tabSizeMenu addItemWithTitle:@"Indent Using" action:@selector(nop:) keyEquivalent:@""] setTarget:self.target];
-	[tabSizeMenu addItem:OakCreateIndentMenuItem(@"Tabs", @selector(setIndentWithTabs:), self.target)];
-	[tabSizeMenu addItem:OakCreateIndentMenuItem(@"Spaces", @selector(setIndentWithSpaces:), self.target)];
+	MBMenu const items = {
+		{ @"Current Indent" },
+		{ @"Indent Size",  @selector(nop:) },
+		{ @"2",            @selector(takeTabSizeFrom:), .tag = 2, .target = self.target, .indent = 1 },
+		{ @"3",            @selector(takeTabSizeFrom:), .tag = 3, .target = self.target, .indent = 1 },
+		{ @"4",            @selector(takeTabSizeFrom:), .tag = 4, .target = self.target, .indent = 1 },
+		{ @"8",            @selector(takeTabSizeFrom:), .tag = 8, .target = self.target, .indent = 1 },
+		{ @"Other…",       @selector(showTabSizeSelectorPanel:),  .target = self.target, .indent = 1 },
+		{ /* -------- */ },
+		{ @"Indent Using", @selector(nop:) },
+		{ @"Tabs",         @selector(setIndentWithTabs:),         .target = self.target, .indent = 1 },
+		{ @"Spaces",       @selector(setIndentWithSpaces:),       .target = self.target, .indent = 1 },
+	};
+	self.tabSizePopUp.menu = MBCreateMenu(items);
 }
 
 - (void)setTarget:(id)newTarget
