@@ -4,11 +4,7 @@
 static NSButton* OakCreateScopeButton (NSString* label, NSUInteger tag, SEL action, id target)
 {
 	NSButton* res = [NSButton new];
-	[[res cell] setBackgroundStyle:NSBackgroundStyleRaised];
-	[[res cell] setControlSize:NSSmallControlSize];
-	NSString* accessibilityRole = NSAccessibilityRadioButtonRole;
-	[[res cell] accessibilitySetOverrideValue:accessibilityRole forAttribute:NSAccessibilityRoleAttribute];
-	[[res cell] accessibilitySetOverrideValue:NSAccessibilityRoleDescription(accessibilityRole, nil) forAttribute:NSAccessibilityRoleDescriptionAttribute];
+	res.accessibilityRole               = NSAccessibilityRadioButtonRole;
 	res.bezelStyle                      = NSRecessedBezelStyle;
 	res.buttonType                      = NSPushOnPushOffButton;
 	res.title                           = label;
@@ -20,12 +16,21 @@ static NSButton* OakCreateScopeButton (NSString* label, NSUInteger tag, SEL acti
 	return res;
 }
 
-@interface OakScopeBarView ()
+@interface OakScopeBarView () <NSAccessibilityGroup>
 @property (nonatomic) NSArray* buttons;
 @property (nonatomic) NSMutableArray* myConstraints;
 @end
 
 @implementation OakScopeBarView
+- (instancetype)initWithFrame:(NSRect)aRect
+{
+	if(self = [super initWithFrame:aRect])
+	{
+		self.accessibilityRole = NSAccessibilityRadioGroupRole;
+	}
+	return self;
+}
+
 - (void)setLabels:(NSArray*)anArray
 {
 	if(_labels == anArray || [_labels isEqualToArray:anArray])
@@ -58,9 +63,9 @@ static NSButton* OakCreateScopeButton (NSString* label, NSUInteger tag, SEL acti
 
 	if(_buttons.count)
 	{
-		[_myConstraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[view]|" options:0 metrics:nil views:@{ @"view" : _buttons[0] }]];
-		[_myConstraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[view]" options:0 metrics:nil views:@{ @"view" : _buttons[0] }]];
-		[_myConstraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[view]|" options:0 metrics:nil views:@{ @"view" : _buttons[_buttons.count-1] }]];
+		[_myConstraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[view]|" options:0 metrics:nil views:@{ @"view": _buttons[0] }]];
+		[_myConstraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[view]" options:0 metrics:nil views:@{ @"view": _buttons[0] }]];
+		[_myConstraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[view]|" options:0 metrics:nil views:@{ @"view": _buttons[_buttons.count-1] }]];
 		for(size_t i = 0; i < [_buttons count]-1; ++i)
 		{
 			[_myConstraints addObject:[NSLayoutConstraint constraintWithItem:_buttons[i] attribute:NSLayoutAttributeRight relatedBy:NSLayoutRelationEqual toItem:_buttons[i+1] attribute:NSLayoutAttributeLeft multiplier:1 constant:0]];
@@ -102,42 +107,4 @@ static NSButton* OakCreateScopeButton (NSString* label, NSUInteger tag, SEL acti
 
 - (id)value                   { return @(self.selectedIndex); }
 - (void)setValue:(id)newValue { self.selectedIndex = [newValue intValue]; }
-
-// =================
-// = Accessibility =
-// =================
-
-- (BOOL)accessibilityIsIgnored
-{
-	return NO;
-}
-
-- (NSSet*)myAccessibilityAttributeNames
-{
-	static NSSet* set = [NSSet setWithArray:@[
-		NSAccessibilityRoleAttribute,
-	]];
-	return set;
-}
-
-- (NSArray*)accessibilityAttributeNames
-{
-	static NSArray* attributes = [[[self myAccessibilityAttributeNames] setByAddingObjectsFromArray:[super accessibilityAttributeNames]] allObjects];
-	return attributes;
-}
-
-- (BOOL)accessibilityIsAttributeSettable:(NSString*)attribute
-{
-	if([[self myAccessibilityAttributeNames] containsObject:attribute])
-		return NO;
-	return [super accessibilityIsAttributeSettable:attribute];
-}
-
-- (id)accessibilityAttributeValue:(NSString *)attribute
-{
-	if([attribute isEqualToString:NSAccessibilityRoleAttribute])
-		return NSAccessibilityRadioGroupRole;
-	else
-		return [super accessibilityAttributeValue:attribute];
-}
 @end

@@ -1,5 +1,8 @@
 #import "OakRolloverButton.h"
 
+NSString* const OakRolloverButtonMouseDidEnterNotification = @"OakRolloverButtonMouseDidEnterNotification";
+NSString* const OakRolloverButtonMouseDidLeaveNotification = @"OakRolloverButtonMouseDidLeaveNotification";
+
 typedef NS_ENUM(NSUInteger, OakImageState) {
 	OakImageStateRegular = 0,
 	OakImageStatePressed,
@@ -120,12 +123,12 @@ typedef NS_ENUM(NSUInteger, OakImageState) {
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowDidChangeMainOrKey:) name:NSWindowDidResignKeyNotification object:newWindow];
 	}
 
-	self.active = ([newWindow styleMask] & NSFullScreenWindowMask) || [newWindow isMainWindow] || [newWindow isKeyWindow];
+	self.active = ([newWindow styleMask] & NSWindowStyleMaskFullScreen) || [newWindow isMainWindow] || [newWindow isKeyWindow];
 }
 
 - (void)windowDidChangeMainOrKey:(NSNotification*)aNotification
 {
-	self.active = ([self.window styleMask] & NSFullScreenWindowMask) || [self.window isMainWindow] || [self.window isKeyWindow];
+	self.active = ([self.window styleMask] & NSWindowStyleMaskFullScreen) || [self.window isMainWindow] || [self.window isKeyWindow];
 }
 
 - (void)updateTrackingAreas
@@ -163,7 +166,11 @@ typedef NS_ENUM(NSUInteger, OakImageState) {
 {
 	if(_mouseInside == flag)
 		return;
+
 	_mouseInside = flag;
 	[self updateImage];
+
+	NSString* notification = _mouseInside ? OakRolloverButtonMouseDidEnterNotification : OakRolloverButtonMouseDidLeaveNotification;
+	[NSNotificationCenter.defaultCenter postNotificationName:notification object:self];
 }
 @end

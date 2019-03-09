@@ -14,7 +14,6 @@
 #import <OakAppKit/OakAppKit.h>
 #import <OakAppKit/NSImage Additions.h>
 #import <OakAppKit/OakToolTip.h>
-#import <OakAppKit/OakPasteboard.h>
 #import <OakAppKit/OakPasteboardChooser.h>
 #import <OakAppKit/OakUIConstructionFunctions.h>
 #import <OakAppKit/NSMenuItem Additions.h>
@@ -28,23 +27,12 @@ static NSString* const kUserDefaultsLineNumberFontNameKey    = @"lineNumberFontN
 static NSString* const kBookmarksColumnIdentifier = @"bookmarks";
 static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 
-@interface OakDisableAccessibilityScrollView : NSScrollView
-@end
-
-@implementation OakDisableAccessibilityScrollView
-- (BOOL)accessibilityIsIgnored
-{
-	return YES;
-}
-@end
-
-@interface OakDocumentView () <GutterViewDelegate, GutterViewColumnDataSource, GutterViewColumnDelegate, OTVStatusBarDelegate>
+@interface OakDocumentView () <NSAccessibilityGroup, GutterViewDelegate, GutterViewColumnDataSource, GutterViewColumnDelegate, OTVStatusBarDelegate>
 {
 	OBJC_WATCH_LEAKS(OakDocumentView);
 
 	NSScrollView* gutterScrollView;
 	GutterView* gutterView;
-	NSColor* gutterDividerColor;
 	NSMutableDictionary* gutterImages;
 
 	OakBackgroundFillView* gutterDividerView;
@@ -69,15 +57,19 @@ static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 	D(DBF_OakDocumentView, bug("%s\n", [NSStringFromRect(aRect) UTF8String]););
 	if(self = [super initWithFrame:aRect])
 	{
+		self.accessibilityRole  = NSAccessibilityGroupRole;
+		self.accessibilityLabel = @"Editor";
+
 		_textView = [[OakTextView alloc] initWithFrame:NSZeroRect];
 		_textView.autoresizingMask = NSViewWidthSizable|NSViewHeightSizable;
 
 		textScrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
-		textScrollView.hasVerticalScroller   = YES;
-		textScrollView.hasHorizontalScroller = YES;
-		textScrollView.autohidesScrollers    = YES;
-		textScrollView.borderType            = NSNoBorder;
-		textScrollView.documentView          = _textView;
+		textScrollView.hasVerticalScroller      = YES;
+		textScrollView.verticalScrollElasticity = NSScrollElasticityAllowed;
+		textScrollView.hasHorizontalScroller    = YES;
+		textScrollView.autohidesScrollers       = YES;
+		textScrollView.borderType               = NSNoBorder;
+		textScrollView.documentView             = _textView;
 
 		gutterView = [[GutterView alloc] initWithFrame:NSZeroRect];
 		gutterView.partnerView = _textView;
@@ -88,7 +80,8 @@ static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 			[gutterView setVisibility:NO forColumnWithIdentifier:GVLineNumbersColumnIdentifier];
 		[gutterView setTranslatesAutoresizingMaskIntoConstraints:NO];
 
-		gutterScrollView = [[OakDisableAccessibilityScrollView alloc] initWithFrame:NSZeroRect];
+		gutterScrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
+		gutterScrollView.accessibilityElement = NO;
 		gutterScrollView.borderType   = NSNoBorder;
 		gutterScrollView.documentView = gutterView;
 
@@ -96,8 +89,8 @@ static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 		[gutterScrollView.contentView addConstraint:[NSLayoutConstraint constraintWithItem:gutterView attribute:NSLayoutAttributeTop relatedBy:NSLayoutRelationEqual toItem:gutterScrollView.contentView attribute:NSLayoutAttributeTop multiplier:1.0 constant:0.0]];
 		[gutterScrollView.contentView addConstraint:[NSLayoutConstraint constraintWithItem:gutterView attribute:NSLayoutAttributeRight relatedBy:NSLayoutRelationEqual toItem:gutterScrollView.contentView attribute:NSLayoutAttributeRight multiplier:1.0 constant:0.0]];
 
-		gutterDividerView = OakCreateVerticalLine(nil);
-		statusDividerView = OakCreateHorizontalLine([NSColor colorWithCalibratedWhite:0.500 alpha:1], [NSColor colorWithCalibratedWhite:0.750 alpha:1]);
+		gutterDividerView = OakCreateVerticalLine(OakBackgroundFillViewStyleNone);
+		statusDividerView = OakCreateHorizontalLine(OakBackgroundFillViewStyleDivider);
 
 		_statusBar = [[OTVStatusBar alloc] initWithFrame:NSZeroRect];
 		_statusBar.delegate = self;
@@ -133,8 +126,8 @@ static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 	}
 
 	[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[gutterScrollView(==gutterView)][gutterDividerView][textScrollView(>=100)]|" options:NSLayoutFormatAlignAllTop|NSLayoutFormatAlignAllBottom metrics:nil views:NSDictionaryOfVariableBindings(gutterScrollView, gutterView, gutterDividerView, textScrollView)]];
-	[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[topView]" options:0 metrics:nil views:@{ @"topView" : stackedViews[0] }]];
-	[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:[bottomView]|" options:0 metrics:nil views:@{ @"bottomView" : [stackedViews lastObject] }]];
+	[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[topView]" options:0 metrics:nil views:@{ @"topView": stackedViews[0] }]];
+	[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:[bottomView]|" options:0 metrics:nil views:@{ @"bottomView": [stackedViews lastObject] }]];
 
 	for(size_t i = 0; i < [stackedViews count]-1; ++i)
 		[self addConstraint:[NSLayoutConstraint constraintWithItem:stackedViews[i] attribute:NSLayoutAttributeBottom relatedBy:NSLayoutRelationEqual toItem:stackedViews[i+1] attribute:NSLayoutAttributeTop multiplier:1 constant:0]];
@@ -165,7 +158,7 @@ static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 	}
 	else
 	{
-		statusDividerView = OakCreateHorizontalLine([NSColor colorWithCalibratedWhite:0.500 alpha:1], [NSColor colorWithCalibratedWhite:0.750 alpha:1]);
+		statusDividerView = OakCreateHorizontalLine(OakBackgroundFillViewStyleDivider);
 
 		_statusBar = [[OTVStatusBar alloc] initWithFrame:NSZeroRect];
 		_statusBar.delegate = self;
@@ -333,7 +326,7 @@ static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 
 	if(_symbolChooser)
 	{
-		_symbolChooser.document        = self.document;
+		_symbolChooser.TMDocument      = self.document;
 		_symbolChooser.selectionString = _textView.selectionString;
 	}
 
@@ -379,6 +372,33 @@ static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 		gutterDividerView.activeBackgroundColor = [NSColor colorWithCGColor:styles.divider];
 
 		[gutterView setNeedsDisplay:YES];
+	}
+}
+
+- (IBAction)takeThemeUUIDFrom:(id)sender
+{
+	[self setThemeWithUUID:[sender representedObject]];
+}
+
+- (void)setThemeWithUUID:(NSString*)themeUUID
+{
+	if(bundles::item_ptr const& themeItem = bundles::lookup(to_s(themeUUID)))
+	{
+		_textView.theme = parse_theme(themeItem);
+		settings_t::set(kSettingsThemeKey, to_s(themeUUID));
+		[self updateStyle];
+	}
+}
+
+- (void)viewDidChangeEffectiveAppearance
+{
+	NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
+	if([defaults boolForKey:@"changeThemeBasedOnAppearance"])
+	{
+		NSAppearanceName appearanceName = [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]];
+		if([appearanceName isEqualToString:NSAppearanceNameDarkAqua])
+				[self setThemeWithUUID:[defaults stringForKey:@"darkModeThemeUUID"]  ?: to_ns(kTwilightThemeUUID)];
+		else	[self setThemeWithUUID:[defaults stringForKey:@"universalThemeUUID"] ?: to_ns(kMacClassicThemeUUID)];
 	}
 }
 
@@ -494,8 +514,8 @@ static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 	{
 		[[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowWillCloseNotification object:_symbolChooser.window];
 
-		_symbolChooser.target   = nil;
-		_symbolChooser.document = nil;
+		_symbolChooser.target     = nil;
+		_symbolChooser.TMDocument = nil;
 	}
 
 	if(_symbolChooser = aSymbolChooser)
@@ -503,7 +523,7 @@ static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 		_symbolChooser.target          = self;
 		_symbolChooser.action          = @selector(symbolChooserDidSelectItems:);
 		_symbolChooser.filterString    = @"";
-		_symbolChooser.document        = self.document;
+		_symbolChooser.TMDocument      = self.document;
 		_symbolChooser.selectionString = _textView.selectionString;
 
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(symbolChooserWillClose:) name:NSWindowWillCloseNotification object:_symbolChooser.window];
@@ -664,21 +684,6 @@ static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 
 - (void)toggleMacroRecording:(id)sender    { [_textView toggleMacroRecording:sender]; }
 
-- (IBAction)takeThemeUUIDFrom:(id)sender
-{
-	[self setThemeWithUUID:[sender representedObject]];
-}
-
-- (void)setThemeWithUUID:(NSString*)themeUUID
-{
-	if(bundles::item_ptr const& themeItem = bundles::lookup(to_s(themeUUID)))
-	{
-		_textView.theme = parse_theme(themeItem);
-		settings_t::set(kSettingsThemeKey, to_s(themeUUID));
-		[self updateStyle];
-	}
-}
-
 // =============================
 // = GutterView Delegate Proxy =
 // =============================
@@ -814,47 +819,6 @@ static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 - (void)documentMarksDidChange:(NSNotification*)aNotification
 {
 	[[NSNotificationCenter defaultCenter] postNotificationName:GVColumnDataSourceDidChange object:self];
-}
-
-// =================
-// = Accessibility =
-// =================
-
-- (BOOL)accessibilityIsIgnored
-{
-	return NO;
-}
-
-- (NSSet*)myAccessibilityAttributeNames
-{
-	static NSSet* set = [NSSet setWithArray:@[
-		NSAccessibilityRoleAttribute,
-		NSAccessibilityDescriptionAttribute,
-	]];
-	return set;
-}
-
-- (NSArray*)accessibilityAttributeNames
-{
-	static NSArray* attributes = [[[self myAccessibilityAttributeNames] setByAddingObjectsFromArray:[super accessibilityAttributeNames]] allObjects];
-	return attributes;
-}
-
-- (BOOL)accessibilityIsAttributeSettable:(NSString*)attribute
-{
-	if([[self myAccessibilityAttributeNames] containsObject:attribute])
-		return NO;
-	return [super accessibilityIsAttributeSettable:attribute];
-}
-
-- (id)accessibilityAttributeValue:(NSString*)attribute
-{
-	if([attribute isEqualToString:NSAccessibilityRoleAttribute])
-		return NSAccessibilityGroupRole;
-	else if([attribute isEqualToString:NSAccessibilityDescriptionAttribute])
-		return @"Editor";
-	else
-		return [super accessibilityAttributeValue:attribute];
 }
 
 // ============

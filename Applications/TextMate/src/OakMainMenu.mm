@@ -71,16 +71,18 @@ static CGPoint MenuPosition ()
 	auto const bundleItems = bundles::query(bundles::kFieldKeyEquivalent, keyString, "", bundles::kItemTypeCommand|bundles::kItemTypeGrammar|bundles::kItemTypeSnippet);
 	if(!bundleItems.empty())
 	{
-		if(bundles::item_ptr item = OakShowMenuForBundleItems(bundleItems, MenuPosition()))
-			[NSApp sendAction:@selector(performBundleItemWithUUIDStringFrom:) to:nil from:@{ @"representedObject" : to_ns(item->uuid()) }];
+		if(bundles::item_ptr item = OakShowMenuForBundleItems(bundleItems, nil, MenuPosition()))
+			[NSApp sendAction:@selector(performBundleItemWithUUIDStringFrom:) to:nil from:@{ @"representedObject": to_ns(item->uuid()) }];
 		return YES;
 	}
 
 	if([super performKeyEquivalent:anEvent])
 		return YES;
-	else if(keyString == "~@\uF702") // ⌥⌘⇠
+	else if(@available(macos 10.13, *))
+		return NO;
+	else if(keyString == "~@\uF702" || keyString == "@{") // ⌥⌘⇠ or ⌘{
 		return [self performWindowMenuAction:@selector(selectPreviousTab:)];
-	else if(keyString == "~@\uF703") // ⌥⌘⇢
+	else if(keyString == "~@\uF703" || keyString == "@}") // ⌥⌘⇢ or ⌘}
 		return [self performWindowMenuAction:@selector(selectNextTab:)];
 	return NO;
 }

@@ -217,7 +217,7 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 
 	dispatch_group_t group = dispatch_group_create();
 	dispatch_group_async(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-		dispatch_apply(bundles.count, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(size_t i){
+		dispatch_apply(bundles.count, DISPATCH_APPLY_AUTO, ^(size_t i){
 			Bundle* bundle = bundles[i];
 			NSString* archive = CacheFileForDownload(bundle.downloadURL, bundle.downloadLastUpdated);
 
@@ -760,8 +760,8 @@ namespace
 	for(Bundle* bundle : [_bundles filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"isInstalled == YES AND path != NULL"]])
 	{
 		NSMutableDictionary* dict = [NSMutableDictionary dictionaryWithDictionary:@{
-			@"uuid"     : [bundle.identifier UUIDString],
-			@"path"     : [bundle.path stringByReplacingOccurrencesOfString:[_installDirectory stringByAppendingString:@"/"] withString:@""],
+			@"uuid": [bundle.identifier UUIDString],
+			@"path": [bundle.path stringByReplacingOccurrencesOfString:[_installDirectory stringByAppendingString:@"/"] withString:@""],
 		}];
 
 		if(bundle.lastUpdated)
@@ -774,7 +774,7 @@ namespace
 		[bundles addObject:dict];
 	}
 
-	NSDictionary* plist = @{ @"bundles" : bundles };
+	NSDictionary* plist = @{ @"bundles": bundles };
 	[plist writeToFile:_localIndexPath atomically:YES];
 }
 @end

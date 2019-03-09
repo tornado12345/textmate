@@ -371,29 +371,44 @@ namespace // wrap in anonymous namespace to avoid clashing with other callbacks 
 	{
 		WATCH_LEAKS(reactivate_callback_t);
 
-		reactivate_callback_t () : shared_count(std::make_shared<size_t>(0))
+		reactivate_callback_t () : _shared_count(std::make_shared<size_t>(0))
 		{
 			D(DBF_RMateServer, bug("%p\n", this););
-			_terminal = [[NSWorkspace sharedWorkspace] frontmostApplication];
+			_terminal = std::make_shared<NSRunningApplication*>([[NSWorkspace sharedWorkspace] frontmostApplication]);
+
+			auto terminal = _terminal;
+			if([*terminal isEqual:NSRunningApplication.currentApplication])
+			{
+				// If we call ‘mate -w’ in quick succession there is a chance that we have not yet re-activated the terminal app when we are asked to open a new document. For this reason, we monitor the NSApplicationDidResignActiveNotification for 200 ms to see if the “real” frontmost application becomes active.
+
+				__weak __block id observerId = [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidResignActiveNotification object:NSApp queue:nil usingBlock:^(NSNotification*){
+					[[NSNotificationCenter defaultCenter] removeObserver:observerId];
+					*terminal = [[NSWorkspace sharedWorkspace] frontmostApplication];
+				}];
+
+				dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 5), dispatch_get_main_queue(), ^{
+					[[NSNotificationCenter defaultCenter] removeObserver:observerId];
+				});
+			}
 		}
 
 		void watch_document (OakDocument* document)
 		{
-			auto counter = shared_count;
-			NSRunningApplication* terminal = _terminal;
+			auto counter  = _shared_count;
+			auto terminal = _terminal;
 
 			++*counter;
 			__weak __block id observerId = [[NSNotificationCenter defaultCenter] addObserverForName:OakDocumentWillCloseNotification object:document queue:nil usingBlock:^(NSNotification*){
-				D(DBF_RMateServer, bug("%zu → %zu\n", *shared_count, *shared_count - 1););
+				D(DBF_RMateServer, bug("%zu → %zu\n", *counter, *counter - 1););
 				if(--*counter == 0)
-					[terminal activateWithOptions:NSApplicationActivateIgnoringOtherApps];
+					[*terminal activateWithOptions:NSApplicationActivateIgnoringOtherApps];
 				[[NSNotificationCenter defaultCenter] removeObserver:observerId];
 			}];
 		}
 
 	private:
-		std::shared_ptr<size_t> shared_count;
-		NSRunningApplication* _terminal;
+		std::shared_ptr<size_t> _shared_count;
+		std::shared_ptr<NSRunningApplication*> _terminal;
 	};
 }
 
@@ -489,7 +504,7 @@ struct socket_observer_t
 				if(n != std::string::npos)
 				{
 					std::string const key   = str.substr(0, n);
-					std::string const value = str.substr(n+2);
+					std::string const value = str.substr(std::min(n+2, str.size()));
 
 					if(key == "data")
 					{
@@ -506,7 +521,27 @@ struct socket_observer_t
 					{
 						D(DBF_RMateServer, bug("Got argument: %s = %s\n", key.c_str(), value.c_str()););
 						if(!value.empty())
-							records.back().arguments.emplace(key, value);
+						{
+							std::string unescaped;
+							bool unescape_next = false;
+							for(auto const& ch : value)
+							{
+								if(unescape_next)
+								{
+									unescaped += ch == 'n' ? '\n' : ch;
+									unescape_next = false;
+								}
+								else if(ch == '\\')
+								{
+									unescape_next = true;
+								}
+								else
+								{
+									unescaped += ch;
+								}
+							}
+							records.back().arguments.emplace(key, unescaped);
+						}
 					}
 				}
 			}

@@ -1,12 +1,10 @@
 #import "Favorites.h"
 #import <OakFilterList/OakAbbreviations.h>
 #import <OakAppKit/OakAppKit.h>
-#import <OakAppKit/OakFileIconImage.h>
 #import <OakAppKit/OakUIConstructionFunctions.h>
 #import <OakAppKit/OakScopeBarView.h>
 #import <OakAppKit/OakSound.h>
 #import <OakFoundation/NSString Additions.h>
-#import <OakFoundation/NSFileManager Additions.h>
 #import <OakSystem/application.h>
 #import <text/ranker.h>
 #import <io/entries.h>
@@ -39,7 +37,7 @@ static NSUInteger const kOakSourceIndexFavorites      = 1;
 + (void)initialize
 {
 	[[NSUserDefaults standardUserDefaults] registerDefaults:@{
-		kUserDefaultsOpenProjectSourceIndex : @0,
+		kUserDefaultsOpenProjectSourceIndex: @0,
 	}];
 }
 
@@ -62,46 +60,41 @@ static NSUInteger const kOakSourceIndexFavorites      = 1;
 		self.tableView.refusesFirstResponder = NO;
 		self.tableView.rowHeight = 38;
 
-		self.window.nextResponder = nil;
-		NSResponder* nextResponder = self.tableView.nextResponder;
-		self.tableView.nextResponder = self;
-		self.nextResponder = nextResponder;
-
 		OakScopeBarView* scopeBar = [OakScopeBarView new];
 		scopeBar.labels = self.sourceListLabels;
 
-		OakBackgroundFillView* aboveScopeBarDark  = OakCreateHorizontalLine([NSColor grayColor], [NSColor lightGrayColor]);
-		OakBackgroundFillView* aboveScopeBarLight = OakCreateHorizontalLine([NSColor colorWithCalibratedWhite:0.797 alpha:1], [NSColor colorWithCalibratedWhite:0.912 alpha:1]);
-		OakBackgroundFillView* topDivider         = OakCreateHorizontalLine([NSColor darkGrayColor], [NSColor colorWithCalibratedWhite:0.551 alpha:1]);
-		OakBackgroundFillView* bottomDivider      = OakCreateHorizontalLine([NSColor grayColor], [NSColor lightGrayColor]);
-
-		NSDictionary* views = @{
-			@"searchField"        : self.searchField,
-			@"aboveScopeBarDark"  : aboveScopeBarDark,
-			@"aboveScopeBarLight" : aboveScopeBarLight,
-			@"scopeBar"           : scopeBar,
-			@"topDivider"         : topDivider,
-			@"scrollView"         : self.scrollView,
-			@"bottomDivider"      : bottomDivider,
-			@"statusTextField"    : self.statusTextField,
-			@"itemCountTextField" : self.itemCountTextField,
+		NSDictionary* titlebarViews = @{
+			@"searchField": self.searchField,
+			@"dividerView": [self makeDividerView],
+			@"scopeBar":    scopeBar,
 		};
 
-		NSView* contentView = self.window.contentView;
-		OakAddAutoLayoutViewsToSuperview([views allValues], contentView);
+		NSView* titlebarView = [[NSView alloc] initWithFrame:NSZeroRect];
+		OakAddAutoLayoutViewsToSuperview(titlebarViews.allValues, titlebarView);
+
+		[titlebarView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(8)-[searchField]-(8)-|" options:0 metrics:nil views:titlebarViews]];
+		[titlebarView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[dividerView]|" options:0 metrics:nil views:titlebarViews]];
+		[titlebarView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(8)-[scopeBar]-(>=8)-|" options:0 metrics:nil views:titlebarViews]];
+
+		[titlebarView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|-(4)-[searchField]-(8)-[dividerView(==1)]-(4)-[scopeBar]-(4)-|" options:0 metrics:nil views:titlebarViews]];
+		[self addTitlebarAccessoryView:titlebarView];
+
+		NSDictionary* footerViews = @{
+			@"dividerView":        [self makeDividerView],
+			@"statusTextField":    self.statusTextField,
+			@"itemCountTextField": self.itemCountTextField,
+		};
+
+		NSView* footerView = self.footerView;
+		OakAddAutoLayoutViewsToSuperview(footerViews.allValues, footerView);
+
+		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[dividerView]|"                                 options:0 metrics:nil views:footerViews]];
+		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-[statusTextField]-[itemCountTextField]-|"      options:NSLayoutFormatAlignAllCenterY metrics:nil views:footerViews]];
+		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[dividerView(==1)]-(4)-[statusTextField]-(5)-|" options:0 metrics:nil views:footerViews]];
+
+		[self updateScrollViewInsets];
+
 		OakSetupKeyViewLoop(@[ self.tableView, self.searchField, scopeBar ]);
-
-		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(8)-[searchField(>=50)]-(8)-|"                      options:0 metrics:nil views:views]];
-		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[aboveScopeBarDark(==aboveScopeBarLight)]|"          options:0 metrics:nil views:views]];
-		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(8)-[scopeBar]-(>=8)-|"                             options:NSLayoutFormatAlignAllBaseline metrics:nil views:views]];
-		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[scrollView(==topDivider,==bottomDivider)]|"         options:0 metrics:nil views:views]];
-		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-[statusTextField]-[itemCountTextField]-|"           options:NSLayoutFormatAlignAllCenterY metrics:nil views:views]];
-
-		[contentView addConstraint:[NSLayoutConstraint constraintWithItem:aboveScopeBarLight attribute:NSLayoutAttributeLeft relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeLeft multiplier:1.0 constant:0.0]];
-		[contentView addConstraint:[NSLayoutConstraint constraintWithItem:topDivider         attribute:NSLayoutAttributeLeft relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeLeft multiplier:1.0 constant:0.0]];
-		[contentView addConstraint:[NSLayoutConstraint constraintWithItem:bottomDivider      attribute:NSLayoutAttributeLeft relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeLeft multiplier:1.0 constant:0.0]];
-
-		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|-(2)-[searchField]-(8)-[aboveScopeBarDark][aboveScopeBarLight]-(3)-[scopeBar]-(4)-[topDivider][scrollView(>=50)][bottomDivider]-(4)-[statusTextField]-(5)-|" options:0 metrics:nil views:views]];
 
 		self.sourceIndex = [[NSUserDefaults standardUserDefaults] integerForKey:kUserDefaultsOpenProjectSourceIndex];
 		[scopeBar bind:NSValueBinding toObject:self withKeyPath:@"sourceIndex" options:nil];
@@ -117,12 +110,19 @@ static NSUInteger const kOakSourceIndexFavorites      = 1;
 	NSTableCellView* res = [aTableView makeViewWithIdentifier:aTableColumn.identifier owner:self];
 	if(!res)
 	{
+		NSImage* removeTemplateImage = [NSImage imageWithSize:NSMakeSize(8, 8) flipped:NO drawingHandler:^BOOL(NSRect dstRect){
+			[[NSColor blackColor] set];
+			NSRectFill(NSInsetRect(dstRect, 0, floor(NSHeight(dstRect)/2)-1));
+			return YES;
+		}];
+		[removeTemplateImage setTemplate:YES];
+
 		NSButton* removeButton = [NSButton new];
-		[[removeButton cell] setControlSize:NSSmallControlSize];
+		removeButton.controlSize = NSControlSizeSmall;
 		removeButton.refusesFirstResponder = YES;
 		removeButton.bezelStyle = NSRoundRectBezelStyle;
 		removeButton.buttonType = NSMomentaryPushInButton;
-		removeButton.image      = [NSImage imageNamed:NSImageNameRemoveTemplate];
+		removeButton.image      = removeTemplateImage;
 		removeButton.target     = self;
 		removeButton.action     = @selector(takeItemToRemoveFrom:);
 
@@ -156,7 +156,7 @@ static NSUInteger const kOakSourceIndexFavorites      = 1;
 		for(id pair in [[[self sharedProjectStateDB] allObjects] sortedArrayUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"value.lastRecentlyUsed" ascending:NO], [NSSortDescriptor sortDescriptorWithKey:@"key.lastPathComponent" ascending:YES selector:@selector(localizedCompare:)] ]])
 		{
 			if(access([pair[@"key"] fileSystemRepresentation], F_OK) == 0)
-				[items addObject:@{ @"path" : pair[@"key"] }];
+				[items addObject:@{ @"path": pair[@"key"] }];
 		}
 	}
 	else if(_sourceIndex == kOakSourceIndexFavorites)
@@ -175,8 +175,8 @@ static NSUInteger const kOakSourceIndexFavorites      = 1;
 						if(subentry->d_type == DT_DIR)
 						{
 							NSMutableDictionary* item = [NSMutableDictionary dictionaryWithDictionary:@{
-								@"path" : [NSString stringWithCxxString:path::join(path, subentry->d_name)],
-								@"isRemoveDisabled" : @YES
+								@"path":             [NSString stringWithCxxString:path::join(path, subentry->d_name)],
+								@"isRemoveDisabled": @YES
 							}];
 
 							if(includeSymlinkName)
@@ -189,8 +189,8 @@ static NSUInteger const kOakSourceIndexFavorites      = 1;
 				else
 				{
 					NSMutableDictionary* item = [NSMutableDictionary dictionaryWithDictionary:@{
-						@"path" : [NSString stringWithCxxString:path],
-						@"link" : [NSString stringWithCxxString:path::join(favoritesPath, entry->d_name)]
+						@"path": [NSString stringWithCxxString:path],
+						@"link": [NSString stringWithCxxString:path::join(favoritesPath, entry->d_name)]
 					}];
 
 					if(path::name(path) != entry->d_name)
@@ -209,12 +209,16 @@ static NSUInteger const kOakSourceIndexFavorites      = 1;
 	for(NSDictionary* item in items)
 	{
 		NSString* path = item[@"path"];
+
+		NSImage* image = [NSWorkspace.sharedWorkspace iconForFile:path];
+		image.size = NSMakeSize(32, 32);
+
 		NSMutableDictionary* tmp = [item mutableCopy];
 		[tmp addEntriesFromDictionary:@{
-			@"icon"   : [OakFileIconImage fileIconImageWithPath:path size:NSMakeSize(32, 32)],
-			@"name"   : item[@"name"]   ?: [NSString stringWithCxxString:path::display_name(to_s(path))],
-			@"folder" : item[@"folder"] ?: [[path stringByDeletingLastPathComponent] stringByAbbreviatingWithTildeInPath],
-			@"info"   : [path stringByAbbreviatingWithTildeInPath]
+			@"icon":   image,
+			@"name":   item[@"name"]   ?: [NSString stringWithCxxString:path::display_name(to_s(path))],
+			@"folder": item[@"folder"] ?: [[path stringByDeletingLastPathComponent] stringByAbbreviatingWithTildeInPath],
+			@"info":   [path stringByAbbreviatingWithTildeInPath]
 		}];
 		[_originalItems addObject:tmp];
 	}
@@ -337,7 +341,7 @@ static NSUInteger const kOakSourceIndexFavorites      = 1;
 		self.sourceIndex = [sender tag];
 }
 
-- (void)updateSelectTabMenu:(NSMenu*)aMenu
+- (void)updateShowTabMenu:(NSMenu*)aMenu
 {
 	if(self.window.isKeyWindow)
 	{

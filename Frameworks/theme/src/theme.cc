@@ -2,6 +2,8 @@
 #include <cf/cf.h>
 
 char const* kMacClassicThemeUUID = "71D40D9D-AE48-11D9-920A-000D93589AF6";
+char const* kTwilightThemeUUID   = "766026CB-703D-4610-B070-8DE07D967C5F";
+char const* kSystemUIThemeUUID   = "64A455D4-9CF4-47C7-B484-3181471D1FD2";
 
 static theme_t::color_info_t read_color (std::string const& str_color);
 static CGFloat read_font_size (std::string const& str_font_size);
@@ -404,7 +406,7 @@ styles_t const& theme_t::styles_for_scope (scope::scope_t const& scope) const
 		CTFontPtr font;
 		if(base.font_name != NULL_STR)
 				font.reset(CTFontCreateWithName(cf::wrap(base.font_name), base.font_size, nullptr), CFRelease);
-		else	font.reset(CTFontCreateUIFontForLanguage(kCTFontUserFixedPitchFontType, base.font_size, nullptr), CFRelease);
+		else	font.reset(CTFontCreateUIFontForLanguage(kCTFontUIFontUserFixedPitch, base.font_size, nullptr), CFRelease);
 
 		if(CTFontSymbolicTraits traits = (base.bold == bool_true ? kCTFontBoldTrait : 0) + (base.italic == bool_true ? kCTFontItalicTrait : 0))
 		{

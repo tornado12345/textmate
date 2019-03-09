@@ -30,7 +30,7 @@
 	aRect = NSInsetRect(aRect, 10, 10);
 	aRect = NSMakeRect(NSMaxX(aRect) - kWidth, NSMaxY(aRect) - kHeight, kWidth, kHeight);
 
-	NSWindow* window = [[NSWindow alloc] initWithContentRect:aRect styleMask:NSBorderlessWindowMask backing:NSBackingStoreBuffered defer:NO];
+	NSWindow* window = [[NSWindow alloc] initWithContentRect:aRect styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
 	if(!window)
 		return nil;
 
@@ -61,7 +61,7 @@
 - (void)setStringValue:(NSString*)someText
 {
 	NSMutableParagraphStyle* pStyle = [NSMutableParagraphStyle new];
-	[pStyle setAlignment:NSCenterTextAlignment];
+	[pStyle setAlignment:NSTextAlignmentCenter];
 
 	NSShadow* shadow = [NSShadow new];
 	[shadow setShadowColor:[NSColor darkGrayColor]];
@@ -69,9 +69,9 @@
 	[shadow setShadowBlurRadius:1.2];
 
 	_textField.objectValue = [[NSMutableAttributedString alloc] initWithString:someText attributes:@{
-		NSParagraphStyleAttributeName  : pStyle,
-		NSForegroundColorAttributeName : [NSColor whiteColor],
-		NSShadowAttributeName          : shadow
+		NSParagraphStyleAttributeName:  pStyle,
+		NSForegroundColorAttributeName: [NSColor whiteColor],
+		NSShadowAttributeName:          shadow
 	}];
 }
 

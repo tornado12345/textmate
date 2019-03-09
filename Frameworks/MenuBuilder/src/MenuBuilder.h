@@ -20,6 +20,7 @@ struct PUBLIC MBMenuItem
 	NSUInteger            modifierFlags     = NSEventModifierFlagCommand;
 	NSInteger             tag               = 0;
 	NSInteger             indent            = 0;
+	NSCellStateValue      state             = NSOffState;
 	id                    target            = nil;
 	id                    delegate          = nil;
 	unichar               key               = 0;
@@ -34,5 +35,5 @@ struct PUBLIC MBMenuItem
 	MBMenu                submenu;
 };
 
-PUBLIC NSMenu* MBCreateMenu (MBMenu const& menu, NSString* title = @"AMainMenu", NSMenu* existingMenu = nil);
+PUBLIC NSMenu* MBCreateMenu (MBMenu const& menu, NSMenu* existingMenu = nil);
 PUBLIC NSString* MBDumpMenu (NSMenu* menu);

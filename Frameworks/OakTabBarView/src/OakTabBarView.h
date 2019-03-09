@@ -1,29 +1,24 @@
-#import <OakAppKit/OakUIConstructionFunctions.h>
-#import <oak/debug.h>
+#import <oak/misc.h>
 
-PUBLIC extern NSString* const kUserDefaultsDisableTabBarCollapsingKey;
-
-PUBLIC @interface OakTabItem : NSObject
-+ (instancetype)tabItemWithTitle:(NSString*)aTitle path:(NSString*)aPath identifier:(NSString*)anIdentifier modified:(BOOL)flag;
+@interface OakTabItem : NSObject
 @property (nonatomic) NSString* title;
 @property (nonatomic) NSString* path;
-@property (nonatomic) NSString* identifier;
+@property (nonatomic, readonly) NSString* identifier;
 @property (nonatomic, getter = isModified) BOOL modified;
 @end
 
 @protocol OakTabBarViewDelegate, OakTabBarViewDataSource;
 
-PUBLIC @interface OakTabBarView : OakBackgroundFillView
+@interface OakTabBarView : NSView
 @property (nonatomic, weak) id <OakTabBarViewDelegate> delegate;
 @property (nonatomic, weak) id <OakTabBarViewDataSource> dataSource;
-@property (nonatomic, readonly) NSUInteger countOfVisibleTabs;
-- (void)expand;
+@property (nonatomic, readonly) NSInteger countOfVisibleTabs;
 - (void)reloadData;
-- (void)setSelectedTab:(NSUInteger)anIndex;
+- (void)setSelectedTabIndex:(NSInteger)anIndex;
+- (void)performClose:(id)sender;
 
-@property (nonatomic, readonly) NSArray* tabItems;
-@property (nonatomic) OakTabItem* selectedTabItem;
-- (OakTabItem*)tabItemForView:(id)aView;
+@property (nonatomic, readonly) NSArray<OakTabItem*>* tabItems;
+@property (nonatomic, readonly) OakTabItem* selectedTabItem;
 
 @property (nonatomic) BOOL neverHideLeftBorder;
 @end

@@ -13,7 +13,7 @@ Onigmo is licensed under the [BSD license][bsd-onig].
 Based on [Oniguruma], copyright K.Kosako.
 
 [Onigmo]: https://github.com/k-takata/Onigmo
-[Oniguruma]: http://www.geocities.jp/kosako3/oniguruma/
+[Oniguruma]: https://github.com/kkos/oniguruma
 [bsd-onig]: https://raw.github.com/k-takata/Onigmo/master/COPYING
 
 ## MASPreferences
@@ -21,15 +21,6 @@ Based on [Oniguruma], copyright K.Kosako.
 [MASPreferences][] is licensed under the BSD license.
 
 [MASPreferences]: https://github.com/shpakovski/MASPreferences
-
-## XcodeEditor
-
-[XcodeEditor][] is copyright Jasper Blues and contributors.
-
-XcodeEditor is licensed under the [Apache license][].
-
-[XcodeEditor]: https://github.com/jasperblues/XcodeEditor
-[Apache license]: http://www.apache.org/licenses/LICENSE-2.0
 
 ## MGScopeBar
 

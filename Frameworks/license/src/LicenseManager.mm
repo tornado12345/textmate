@@ -93,9 +93,9 @@ static NSTextField* OakCreateTextField ()
 @implementation AddLicenseViewController
 - (void)loadView
 {
-	self.ownerLabel       = OakCreateLabel(@"Owner:", nil, NSRightTextAlignment);
+	self.ownerLabel       = OakCreateLabel(@"Owner:", nil, NSTextAlignmentRight);
 	self.ownerTextField   = OakCreateTextField();
-	self.licenseLabel     = OakCreateLabel(@"License:", nil, NSRightTextAlignment);
+	self.licenseLabel     = OakCreateLabel(@"License:", nil, NSTextAlignmentRight);
 	self.licenseTextField = OakCreateTextField();
 	self.licenseTextField.font = [NSFont userFixedPitchFontOfSize:12];
 	self.statusTextField  = OakCreateLabel(@"", [NSFont labelFontOfSize:0]);
@@ -126,14 +126,14 @@ static NSTextField* OakCreateTextField ()
 
 	OakSetupKeyViewLoop(@[ self.ownerTextField, self.licenseTextField, self.buyButton, self.cancelButton, self.registerButton ]);
 	NSDictionary* views = @{
-		@"ownerLabel"   : self.ownerLabel,
-		@"owner"        : self.ownerTextField,
-		@"licenseLabel" : self.licenseLabel,
-		@"license"      : self.licenseTextField,
-		@"status"       : self.statusTextField,
-		@"buy"          : self.buyButton,
-		@"cancel"       : self.cancelButton,
-		@"register"     : self.registerButton,
+		@"ownerLabel":   self.ownerLabel,
+		@"owner":        self.ownerTextField,
+		@"licenseLabel": self.licenseLabel,
+		@"license":      self.licenseTextField,
+		@"status":       self.statusTextField,
+		@"buy":          self.buyButton,
+		@"cancel":       self.cancelButton,
+		@"register":     self.registerButton,
 	};
 
 	self.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
@@ -172,7 +172,7 @@ static NSTextField* OakCreateTextField ()
 @implementation AddLicenseWindowController
 - (instancetype)initWithLicense:(License*)license
 {
-	if((self = [super initWithWindow:[[NSPanel alloc] initWithContentRect:NSZeroRect styleMask:(NSTitledWindowMask|NSClosableWindowMask|NSMiniaturizableWindowMask) backing:NSBackingStoreBuffered defer:NO]]))
+	if((self = [super initWithWindow:[[NSPanel alloc] initWithContentRect:NSZeroRect styleMask:(NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable) backing:NSBackingStoreBuffered defer:NO]]))
 	{
 		self.window.title    = @"Add License";
 		self.window.level    = NSModalPanelWindowLevel;
@@ -290,22 +290,18 @@ static NSString* const kAddLicenseViewIdentifier = @"org.TextMate.addLicenseButt
 
 - (void)addRegisterButtonToWindow:(NSWindow*)window
 {
-	// MAC_OS_X_VERSION_10_10
-	if(![window respondsToSelector:@selector(addTitlebarAccessoryViewController:)])
-		return;
-
 	NSButton* addLicenseButton = [[NSButton alloc] initWithFrame:NSZeroRect];
 
 	addLicenseButton.cell.backgroundStyle = NSBackgroundStyleRaised;
-	addLicenseButton.cell.controlSize     = NSSmallControlSize;
 
 	addLicenseButton.showsBorderOnlyWhileMouseInside = YES;
-	addLicenseButton.font       = [NSFont messageFontOfSize:[NSFont systemFontSizeForControlSize:NSSmallControlSize]];
-	addLicenseButton.bezelStyle = NSRecessedBezelStyle;
-	addLicenseButton.buttonType = NSMomentaryPushInButton;
-	addLicenseButton.title      = @"Add License";
-	addLicenseButton.action     = @selector(showAddLicensePopover:);
-	addLicenseButton.target     = self;
+	addLicenseButton.controlSize = NSControlSizeSmall;
+	addLicenseButton.font        = [NSFont messageFontOfSize:[NSFont systemFontSizeForControlSize:NSControlSizeSmall]];
+	addLicenseButton.bezelStyle  = NSRecessedBezelStyle;
+	addLicenseButton.buttonType  = NSMomentaryPushInButton;
+	addLicenseButton.title       = @"Add License";
+	addLicenseButton.action      = @selector(showAddLicensePopover:);
+	addLicenseButton.target      = self;
 
 	[addLicenseButton sizeToFit];
 
@@ -318,10 +314,6 @@ static NSString* const kAddLicenseViewIdentifier = @"org.TextMate.addLicenseButt
 
 - (void)removeAllRegisterButtons:(id)sender
 {
-	// MAC_OS_X_VERSION_10_10
-	if(![NSWindow instancesRespondToSelector:@selector(titlebarAccessoryViewControllers)])
-		return;
-
 	for(NSWindow* win in [NSApp orderedWindows])
 	{
 		NSArray* viewControllers = win.titlebarAccessoryViewControllers;

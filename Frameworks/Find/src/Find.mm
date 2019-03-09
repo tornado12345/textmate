@@ -40,6 +40,7 @@ enum FindActionTag
 @property (nonatomic) FindWindowController* windowController;
 @property (nonatomic) FFDocumentSearch* documentSearch;
 @property (nonatomic) FFResultNode* results;
+@property (nonatomic, weak) id <FindDelegate> resultsDelegate;
 @property (nonatomic) NSUInteger countOfMatches;
 @property (nonatomic) NSUInteger countOfExcludedMatches;
 @property (nonatomic) NSUInteger countOfReadOnlyMatches;
@@ -296,7 +297,7 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 			case FindActionReplace:        _findOperation = kFindOperationReplace;                                                          break;
 		}
 
-		self.closeWindowOnSuccess = action == FindActionFindNext && [[NSApp currentEvent] type] == NSKeyDown && to_s([NSApp currentEvent]) == utf8::to_s(NSCarriageReturnCharacter);
+		self.closeWindowOnSuccess = action == FindActionFindNext && [[NSApp currentEvent] type] == NSEventTypeKeyDown && to_s([NSApp currentEvent]) == utf8::to_s(NSCarriageReturnCharacter);
 		[OakPasteboard pasteboardWithName:NSFindPboard].auxiliaryOptionsForCurrent = nil;
 		[NSApp sendAction:@selector(performFindOperation:) to:nil from:self];
 	}
@@ -321,8 +322,8 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 
 	NSResponder* keyView = [[NSApp keyWindow] firstResponder];
 	id element = [keyView respondsToSelector:@selector(cell)] ? [keyView performSelector:@selector(cell)] : keyView;
-	if([element respondsToSelector:@selector(accessibilityIsIgnored)] && ![element accessibilityIsIgnored])
-		NSAccessibilityPostNotificationWithUserInfo(element, NSAccessibilityAnnouncementRequestedNotification, @{ NSAccessibilityAnnouncementKey : self.windowController.statusString });
+	if([element respondsToSelector:@selector(isAccessibilityElement)] && [element isAccessibilityElement])
+		NSAccessibilityPostNotificationWithUserInfo(element, NSAccessibilityAnnouncementRequestedNotification, @{ NSAccessibilityAnnouncementKey: self.windowController.statusString });
 
 	if(self.closeWindowOnSuccess && aNumber != 0)
 		return [self.windowController close];
@@ -396,6 +397,7 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	}
 
 	_windowController.resultsViewController.results = _results = [FFResultNode new];
+	_resultsDelegate = self.delegate;
 }
 
 - (void)setDocumentSearch:(FFDocumentSearch*)newSearcher
@@ -454,12 +456,12 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	for(FFResultNode* parent in _results.children)
 	{
 		[documents addObject:@{
-			@"identifier"      : parent.firstResultNode.document.identifier.UUIDString,
-			@"firstMatchRange" : [NSString stringWithCxxString:parent.firstResultNode.match.range],
-			@"lastMatchRange"  : [NSString stringWithCxxString:parent.lastResultNode.match.range],
+			@"identifier":      parent.firstResultNode.document.identifier.UUIDString,
+			@"firstMatchRange": [NSString stringWithCxxString:parent.firstResultNode.match.range],
+			@"lastMatchRange":  [NSString stringWithCxxString:parent.lastResultNode.match.range],
 		}];
 	}
-	[OakPasteboard pasteboardWithName:NSFindPboard].auxiliaryOptionsForCurrent = @{ @"documents" : documents };
+	[OakPasteboard pasteboardWithName:NSFindPboard].auxiliaryOptionsForCurrent = @{ @"documents": documents };
 }
 
 - (void)folderSearchDidFinish:(NSNotification*)aNotification
@@ -537,13 +539,20 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	OakDocument* doc = item.document;
 	if(!doc.isOpen)
 		doc.recentTrackingDisabled = YES;
-	[OakDocumentController.sharedInstance showDocument:doc andSelect:item.match.range inProject:self.projectIdentifier bringToFront:NO];
+
+	NSMutableDictionary* captures = [NSMutableDictionary dictionary];
+	for(auto pair : item.match.captures)
+		captures[to_ns(pair.first)] = to_ns(pair.second);
+	doc.matchCaptures = [captures copy];
+
+	[_resultsDelegate selectRange:item.match.range inDocument:doc];
 }
 
 - (void)didDoubleClickResult:(FFResultNode*)item
 {
 	if([[[NSUserDefaults standardUserDefaults] objectForKey:kUserDefaultsKeepSearchResultsOnDoubleClick] boolValue])
 		return;
+	[_resultsDelegate bringToFront];
 	[self.windowController close];
 }
 
@@ -572,9 +581,9 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	_windowController.statusString = [NSString stringWithFormat:fmt, [_documentSearch searchString], [NSNumberFormatter localizedStringFromNumber:@(self.countOfMatches) numberStyle:NSNumberFormatterDecimalStyle]];
 }
 
-// =======================
-// = Select Tab… Submenu =
-// =======================
+// =====================
+// = Show Tab… Submenu =
+// =====================
 
 - (IBAction)takeSelectedPathFrom:(id)sender
 {
@@ -583,7 +592,7 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 		[_windowController.resultsViewController showResultNode:item.firstResultNode];
 }
 
-- (void)updateSelectTabMenu:(NSMenu*)aMenu
+- (void)updateShowTabMenu:(NSMenu*)aMenu
 {
 	if(self.countOfMatches == 0)
 	{
@@ -620,13 +629,13 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 		[array addObject:captures.empty() ? _windowController.replaceString : to_ns(format_string::expand(replacementString, captures))];
 	}
 
-	[[NSPasteboard generalPasteboard] declareTypes:@[ NSStringPboardType ] owner:nil];
-	[[NSPasteboard generalPasteboard] setString:[array componentsJoinedByString:@"\n"] forType:NSStringPboardType];
+	[NSPasteboard.generalPasteboard clearContents];
+	[NSPasteboard.generalPasteboard writeObjects:array];
 }
 
 - (void)copyEntireLines:(BOOL)entireLines withFilename:(BOOL)withFilename
 {
-	std::vector<std::string> res;
+	NSMutableArray* array = [NSMutableArray array];
 
 	for(FFResultNode* item in _windowController.resultsViewController.selectedResults)
 	{
@@ -641,11 +650,11 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 		if(withFilename)
 			str = text::format("%s:%lu\t", [item.path UTF8String], m.lineNumber + 1) + str;
 
-		res.push_back(str);
+		[array addObject:to_ns(str)];
 	}
 
-	[[NSPasteboard generalPasteboard] declareTypes:@[ NSStringPboardType ] owner:nil];
-	[[NSPasteboard generalPasteboard] setString:[NSString stringWithCxxString:text::join(res, "\n")] forType:NSStringPboardType];
+	[NSPasteboard.generalPasteboard clearContents];
+	[NSPasteboard.generalPasteboard writeObjects:array];
 }
 
 - (void)copy:(id)sender                          { [self copyEntireLines:YES withFilename:NO ]; }

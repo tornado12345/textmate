@@ -9,6 +9,7 @@
 #import <text/tokenize.h>
 #import <text/trim.h>
 #import <text/encode.h>
+#import <text/parse.h>
 #import <command/runner.h> // bundle_command_t, fix_shebang
 #import <bundles/wrappers.h>
 #import <regexp/format_string.h>
@@ -300,8 +301,8 @@ static pid_t run_command (dispatch_group_t rootGroup, std::string const& cmd, in
 			else	message = text::format("This command requires ‘%1$s’ which wasn’t found on your system.\n\nThe following locations were searched:%2$s\n\nIf ‘%1$s’ is installed elsewhere then you need to set PATH in Preferences → Variables to include the folder in which it can be found.", failedRequirement.command.c_str(), ("\n\u2003• " + text::join(paths, "\n\u2003• ")).c_str());
 
 			NSMutableDictionary* dict = [NSMutableDictionary dictionaryWithDictionary:@{
-				NSLocalizedDescriptionKey             : [NSString stringWithFormat:@"Unable to run “%.*s”.", (int)_bundleCommand.name.size(), _bundleCommand.name.data()],
-				NSLocalizedRecoverySuggestionErrorKey : to_ns(message),
+				NSLocalizedDescriptionKey:             [NSString stringWithFormat:@"Unable to run “%.*s”.", (int)_bundleCommand.name.size(), _bundleCommand.name.data()],
+				NSLocalizedRecoverySuggestionErrorKey: to_ns(message),
 			}];
 
 			if(failedRequirement.more_info_url != NULL_STR)
@@ -414,13 +415,30 @@ static pid_t run_command (dispatch_group_t rootGroup, std::string const& cmd, in
 		if(normalExit == NO && _userDidAbort == NO)
 		{
 			NSMutableDictionary* dict = [NSMutableDictionary dictionaryWithDictionary:@{
-				NSLocalizedDescriptionKey             : [NSString stringWithFormat:@"Failure running “%@”.", to_ns(_bundleCommand.name)],
-				NSLocalizedRecoverySuggestionErrorKey : to_ns(text::trim(err + out).empty() ? text::format("Command returned status code %d.", rc) : err + out) ?: @"Command output is not UTF-8.",
+				NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failure running “%@”.", to_ns(_bundleCommand.name)],
 			}];
 
+			NSMutableArray* buttonLabels = [NSMutableArray arrayWithObject:@"OK"];
 			if(bundles::lookup(_bundleCommand.uuid))
+				[buttonLabels addObject:@"Edit Command"];
+
+			std::string output = text::trim(err + out);
+			if(std::count(output.begin(), output.end(), '\n') > 7)
 			{
-				dict[NSLocalizedRecoveryOptionsErrorKey] = @[ @"OK", @"Edit Command" ];
+				[buttonLabels addObject:@"Show Full Output"];
+				dict[@"OakCommandOutput"] = to_ns(output);
+
+				std::vector<std::string> lines = text::split(output, "\n");
+				lines.erase(lines.begin() + 4, lines.begin() + lines.size() - 3);
+				lines[3] = "⋮";
+				output = text::join(lines, "\n");
+			}
+
+			dict[NSLocalizedRecoverySuggestionErrorKey] = to_ns(output.empty() ? text::format("Command returned status code %d.", rc) : output) ?: @"Command output is not UTF-8.";
+
+			if(buttonLabels.count > 1)
+			{
+				dict[NSLocalizedRecoveryOptionsErrorKey] = buttonLabels;
 				dict[NSRecoveryAttempterErrorKey]        = self;
 			}
 
@@ -472,7 +490,7 @@ static pid_t run_command (dispatch_group_t rootGroup, std::string const& cmd, in
 
 		// Wake potential event loop
 		didTerminate = YES;
-		[NSApp postEvent:[NSEvent otherEventWithType:NSApplicationDefined location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0 context:NULL subtype:0 data1:0 data2:0] atStart:NO];
+		[NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0 context:NULL subtype:0 data1:0 data2:0] atStart:NO];
 		[[NSNotificationCenter defaultCenter] postNotificationName:OakCommandDidTerminateNotification object:self];
 	});
 
@@ -519,6 +537,12 @@ static pid_t run_command (dispatch_group_t rootGroup, std::string const& cmd, in
 			{
 				Class cl = NSClassFromString(@"BundleEditor");
 				[[cl sharedInstance] revealBundleItem:bundles::lookup(_bundleCommand.uuid)];
+			}
+			else if(recoveryOptionIndex == 2)
+			{
+				NSString* commandOutput = error.userInfo[@"OakCommandOutput"];
+				OakDocument* doc = [OakDocument documentWithString:commandOutput fileType:@"text.plain" customName:@"Command Output"];
+				[OakDocumentController.sharedInstance showDocument:doc];
 			}
 		}
 		break;

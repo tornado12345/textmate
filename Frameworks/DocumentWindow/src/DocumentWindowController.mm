@@ -7,16 +7,15 @@
 #import <OakAppKit/NSAlert Additions.h>
 #import <OakAppKit/NSMenuItem Additions.h>
 #import <OakAppKit/OakAppKit.h>
-#import <OakAppKit/OakFileIconImage.h>
-#import <OakAppKit/OakFileManager.h>
 #import <OakAppKit/OakPasteboard.h>
 #import <OakAppKit/OakSavePanel.h>
+#import <OakAppKit/OakUIConstructionFunctions.h>
 #import <MenuBuilder/MenuBuilder.h>
 #import <OakTabBarView/OakTabBarView.h>
 #import <OakFoundation/NSString Additions.h>
 #import <Preferences/Keys.h>
 #import <OakTextView/OakDocumentView.h>
-#import <OakFileBrowser/OakFileBrowser.h>
+#import <FileBrowser/FileBrowserViewController.h>
 #import <OakCommand/OakCommand.h>
 #import <HTMLOutputWindow/HTMLOutputWindow.h>
 #import <OakFilterList/FileChooser.h>
@@ -64,25 +63,7 @@ static void show_command_error (std::string const& message, oak::uuid_t const& u
 	}];
 }
 
-@interface QuickLookNSURLWrapper : NSObject <QLPreviewItem>
-@property (nonatomic) NSURL* url;
-@end
-
-@implementation QuickLookNSURLWrapper
-- (id)initWithURL:(NSURL*)aURL
-{
-	if((self = [super init]))
-		self.url = aURL;
-	return self;
-}
-
-- (NSURL*)previewItemURL
-{
-	return self.url;
-}
-@end
-
-@interface DocumentWindowController () <NSWindowDelegate, NSTouchBarDelegate, OakTabBarViewDelegate, OakTabBarViewDataSource, OakTextViewDelegate, OakFileBrowserDelegate, QLPreviewPanelDelegate, QLPreviewPanelDataSource>
+@interface DocumentWindowController () <NSWindowDelegate, NSTouchBarDelegate, OakTabBarViewDelegate, OakTabBarViewDataSource, OakTextViewDelegate, FileBrowserDelegate, FindDelegate>
 {
 	OBJC_WATCH_LEAKS(DocumentWindowController);
 
@@ -97,11 +78,12 @@ static void show_command_error (std::string const& message, oak::uuid_t const& u
 	std::map<std::string, std::string>     _documentSCMVariables;
 	std::vector<std::string>               _documentScopeAttributes; // attr.os-version, attr.untitled / attr.rev-path + kSettingsScopeAttributesKey
 }
+@property (nonatomic) NSTitlebarAccessoryViewController* titlebarViewController;
 @property (nonatomic) ProjectLayoutView*          layoutView;
 @property (nonatomic) OakTabBarView*              tabBarView;
 @property (nonatomic) OakDocumentView*            documentView;
 @property (nonatomic) OakTextView*                textView;
-@property (nonatomic) OakFileBrowser*             fileBrowser;
+@property (nonatomic) FileBrowserViewController*  fileBrowser;
 
 @property (nonatomic) BOOL                        disableFileBrowserWindowResize;
 @property (nonatomic) BOOL                        autoRevealFile;
@@ -118,19 +100,19 @@ static void show_command_error (std::string const& message, oak::uuid_t const& u
 
 @property (nonatomic) NSString*                   documentPath;
 
-@property (nonatomic) NSArray*                    urlArrayForQuickLook;
 @property (nonatomic) NSArray<Bundle*>*           bundlesAlreadySuggested;
 
-@property (nonatomic, readwrite) OakDocument*     selectedDocument;
-@property (nonatomic) NSArrayController*          arrayController;
+@property (nonatomic, readwrite) NSArray<OakDocument*>* documents;
+@property (nonatomic, readwrite) OakDocument*           selectedDocument;
+@property (nonatomic) NSArrayController*                arrayController;
 
 + (void)scheduleSessionBackup:(id)sender;
 
 - (void)makeTextViewFirstResponder:(id)sender;
 - (void)updateFileBrowserStatus:(id)sender;
 
-- (void)fileBrowser:(OakFileBrowser*)aFileBrowser openURLs:(NSArray*)someURLs;
-- (void)fileBrowser:(OakFileBrowser*)aFileBrowser closeURL:(NSURL*)anURL;
+- (void)fileBrowser:(FileBrowserViewController*)fileBrowser openURLs:(NSArray*)someURLs;
+- (void)fileBrowser:(FileBrowserViewController*)fileBrowser closeURL:(NSURL*)anURL;
 
 - (void)takeNewTabIndexFrom:(id)sender;   // used by newDocumentInTab:
 - (void)takeTabsToTearOffFrom:(id)sender; // used by moveDocumentToNewWindow:
@@ -200,18 +182,19 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 		self.textView.delegate = self;
 
 		self.layoutView = [[ProjectLayoutView alloc] initWithFrame:NSZeroRect];
-		self.layoutView.tabBarView   = self.tabBarView;
 		self.layoutView.documentView = self.documentView;
 
-		NSUInteger windowStyle = (NSTitledWindowMask|NSClosableWindowMask|NSResizableWindowMask|NSMiniaturizableWindowMask|NSTexturedBackgroundWindowMask);
+		NSUInteger windowStyle = (NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable);
 		self.window = [[NSWindow alloc] initWithContentRect:[NSWindow contentRectForFrameRect:[self frameRectForNewWindow] styleMask:windowStyle] styleMask:windowStyle backing:NSBackingStoreBuffered defer:NO];
 		self.window.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
 		self.window.delegate           = self;
 		self.window.releasedWhenClosed = NO;
-		[self.window setContentBorderThickness:0 forEdge:NSMaxYEdge]; // top border
-		[self.window setContentBorderThickness:0 forEdge:NSMinYEdge]; // bottom border
-		[self.window setAutorecalculatesContentBorderThickness:NO forEdge:NSMaxYEdge];
-		[self.window setAutorecalculatesContentBorderThickness:NO forEdge:NSMinYEdge];
+
+		_titlebarViewController = [[NSTitlebarAccessoryViewController alloc] init];
+		self.tabBarView.frameSize = self.tabBarView.intrinsicContentSize;
+		_titlebarViewController.view = self.tabBarView;
+		_titlebarViewController.fullScreenMinHeight = NSHeight(self.tabBarView.frame);
+		[self.window addTitlebarAccessoryViewController:_titlebarViewController];
 
 		[LicenseManager.sharedInstance decorateWindow:self.window];
 
@@ -219,8 +202,8 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 		OakSetupKeyViewLoop(@[ self.layoutView ], NO);
 		self.window.initialFirstResponder = self.textView;
 
-		[self.window.contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[view]|" options:0 metrics:nil views:@{ @"view" : self.layoutView }]];
-		[self.window.contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[view]|" options:0 metrics:nil views:@{ @"view" : self.layoutView }]];
+		[self.window.contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[view]|" options:0 metrics:nil views:@{ @"view": self.layoutView }]];
+		[self.window.contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[view]|" options:0 metrics:nil views:@{ @"view": self.layoutView }]];
 
 		_arrayController = [[NSArrayController alloc] init];
 		[_arrayController bind:NSContentBinding toObject:self withKeyPath:@"documents" options:nil];
@@ -231,7 +214,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(userDefaultsDidChange:) name:NSUserDefaultsDidChangeNotification object:[NSUserDefaults standardUserDefaults]];
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationDidBecomeActiveNotification:) name:NSApplicationDidBecomeActiveNotification object:NSApp];
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationDidResignActiveNotification:) name:NSApplicationDidResignActiveNotification object:NSApp];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(fileManagerWillDeleteItemAtPath:) name:OakFileManagerWillDeleteItemAtPath object:nil];
+		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(fileBrowserWillDelete:) name:FileBrowserWillDeleteNotification object:nil];
 
 		[self userDefaultsDidChange:nil];
 	}
@@ -269,8 +252,13 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 
 - (NSRect)cascadedWindowFrame
 {
-	NSRect r = [self windowFrame];
-	return { { NSMinX(r) + 21, NSMinY(r) - 23 }, r.size };
+	NSRect frameRect   = [self windowFrame];
+	NSRect contentRect = [NSWindow contentRectForFrameRect:frameRect styleMask:self.window.styleMask];
+
+	CGFloat offset = NSMaxY(frameRect) - NSMaxY(contentRect);
+	frameRect.origin.y -= offset;
+	frameRect.origin.x += offset;
+	return frameRect;
 }
 
 - (NSRect)frameRectForNewWindow
@@ -278,7 +266,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	std::map<CGFloat, NSWindow*> ourWindows;
 	for(NSWindow* win in [NSApp windows])
 	{
-		if([win isVisible] && [win isOnActiveSpace] && ![win isZoomed] && (([win styleMask] & NSFullScreenWindowMask)) != NSFullScreenWindowMask && [[win delegate] isKindOfClass:[self class]])
+		if([win isVisible] && [win isOnActiveSpace] && ![win isZoomed] && (([win styleMask] & NSWindowStyleMaskFullScreen)) != NSWindowStyleMaskFullScreen && [[win delegate] isKindOfClass:[self class]])
 			ourWindows.emplace(NSMaxY([win frame]), win);
 	}
 
@@ -321,7 +309,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 
 - (void)windowWillClose:(NSNotification*)aNotification
 {
-	if((([self.window styleMask] & NSFullScreenWindowMask) != NSFullScreenWindowMask) && !self.window.isZoomed)
+	if((([self.window styleMask] & NSWindowStyleMaskFullScreen) != NSWindowStyleMaskFullScreen) && !self.window.isZoomed)
 		[[NSUserDefaults standardUserDefaults] setObject:NSStringFromRect([self windowFrame]) forKey:@"DocumentControllerWindowFrame"];
 
 	[_arrayController unbind:NSContentBinding];
@@ -338,7 +326,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	{
 		OakDocument* defaultDocument = [OakDocumentController.sharedInstance untitledDocument];
 		self.documents = @[ defaultDocument ];
-		[self openAndSelectDocument:defaultDocument];
+		[self openAndSelectDocument:defaultDocument activate:YES];
 	}
 	[self.window makeKeyAndOrderFront:sender];
 }
@@ -385,6 +373,12 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	{
 		self.oldWindowFrame = self.newWindowFrame = NSZeroRect;
 		self.layoutView.fileBrowserOnRight = !self.layoutView.fileBrowserOnRight;
+	}
+
+	if(@available(macos 10.12, *))
+	{
+		BOOL disableTabBarCollapsingKey = [NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsDisableTabBarCollapsingKey];
+		self.titlebarViewController.hidden = !disableTabBarCollapsingKey && self.documents.count <= 1;
 	}
 }
 
@@ -460,7 +454,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 		if(![doc isEqual:self.selectedDocument])
 		{
 			self.selectedTabIndex = [self.documents indexOfObject:doc];
-			[self openAndSelectDocument:doc];
+			[self openAndSelectDocument:doc activate:YES];
 		}
 	}
 
@@ -491,7 +485,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	}];
 }
 
-- (void)closeTabsAtIndexes:(NSIndexSet*)anIndexSet askToSaveChanges:(BOOL)askToSaveFlag createDocumentIfEmpty:(BOOL)createIfEmptyFlag
+- (void)closeTabsAtIndexes:(NSIndexSet*)anIndexSet askToSaveChanges:(BOOL)askToSaveFlag createDocumentIfEmpty:(BOOL)createIfEmptyFlag activate:(BOOL)activateFlag
 {
 	NSArray<OakDocument*>* documentsToClose = [_documents objectsAtIndexes:anIndexSet];
 	if(documentsToClose.count == 0)
@@ -505,14 +499,14 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 			[self showCloseWarningUIForDocuments:documentsToSave completionHandler:^(BOOL canClose){
 				if(canClose)
 				{
-					[self closeTabsAtIndexes:anIndexSet askToSaveChanges:NO createDocumentIfEmpty:createIfEmptyFlag];
+					[self closeTabsAtIndexes:anIndexSet askToSaveChanges:NO createDocumentIfEmpty:createIfEmptyFlag activate:activateFlag];
 				}
 				else
 				{
 					NSIndexSet* newIndexes = [_documents indexesOfObjectsAtIndexes:anIndexSet options:0 passingTest:^BOOL(OakDocument* doc, NSUInteger idx, BOOL* stop){
 						return doc.isDocumentEdited == NO;
 					}];
-					[self closeTabsAtIndexes:newIndexes askToSaveChanges:YES createDocumentIfEmpty:createIfEmptyFlag];
+					[self closeTabsAtIndexes:newIndexes askToSaveChanges:YES createDocumentIfEmpty:createIfEmptyFlag activate:activateFlag];
 				}
 			}];
 			return;
@@ -535,11 +529,20 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	if(createIfEmptyFlag && newDocuments.count == 0)
 		[newDocuments addObject:[OakDocumentController.sharedInstance untitledDocument]];
 
-	self.documents        = newDocuments;
-	self.selectedTabIndex = newSelectedTabIndex;
+	[NSAnimationContext runAnimationGroup:^(NSAnimationContext* context){
+		context.allowsImplicitAnimation = YES;
+		self.documents        = newDocuments;
+		self.selectedTabIndex = newSelectedTabIndex;
+	} completionHandler:^{
+	}];
 
 	if(newDocuments.count && ![newDocuments[newSelectedTabIndex].identifier isEqual:selectedUUID])
-		[self openAndSelectDocument:newDocuments[newSelectedTabIndex]];
+		[self openAndSelectDocument:newDocuments[newSelectedTabIndex] activate:activateFlag];
+}
+
+- (void)performClose:(id)sender
+{
+	[self.tabBarView performClose:sender];
 }
 
 - (IBAction)performCloseTab:(id)sender
@@ -547,7 +550,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	NSUInteger index = [sender isKindOfClass:[OakTabBarView class]] ? [sender tag] : _selectedTabIndex;
 	if(index == NSNotFound || _documents.count == 0 || _documents.count == 1 && (is_disposable(self.selectedDocument) || !self.fileBrowserVisible))
 		return [self performCloseWindow:sender];
-	[self closeTabsAtIndexes:[NSIndexSet indexSetWithIndex:index] askToSaveChanges:YES createDocumentIfEmpty:YES];
+	[self closeTabsAtIndexes:[NSIndexSet indexSetWithIndex:index] askToSaveChanges:YES createDocumentIfEmpty:YES activate:YES];
 }
 
 - (IBAction)performCloseSplit:(id)sender
@@ -566,7 +569,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	NSIndexSet* allTabs = [_documents indexesOfObjectsPassingTest:^BOOL(OakDocument* doc, NSUInteger idx, BOOL* stop){
 		return [self isDocumentSticky:doc] == NO && (doc.isDocumentEdited == NO || doc.path);
 	}];
-	[self closeTabsAtIndexes:allTabs askToSaveChanges:YES createDocumentIfEmpty:YES];
+	[self closeTabsAtIndexes:allTabs askToSaveChanges:YES createDocumentIfEmpty:YES activate:YES];
 }
 
 - (IBAction)performCloseOtherTabsXYZ:(id)sender
@@ -578,14 +581,14 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	NSUInteger tabIndex = [sender isKindOfClass:[OakTabBarView class]] ? [sender tag] : _selectedTabIndex;
 	[otherTabs removeIndex:tabIndex];
 
-	[self closeTabsAtIndexes:otherTabs askToSaveChanges:YES createDocumentIfEmpty:YES];
+	[self closeTabsAtIndexes:otherTabs askToSaveChanges:YES createDocumentIfEmpty:YES activate:YES];
 }
 
 - (IBAction)performCloseTabsToTheRight:(id)sender
 {
 	NSUInteger from = _selectedTabIndex + 1, to = _documents.count;
 	if(from < to)
-		[self closeTabsAtIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(from, to - from)] askToSaveChanges:YES createDocumentIfEmpty:YES];
+		[self closeTabsAtIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(from, to - from)] askToSaveChanges:YES createDocumentIfEmpty:YES activate:YES];
 }
 
 - (void)saveProjectState
@@ -623,29 +626,26 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	return NO;
 }
 
-- (void)fileManagerWillDeleteItemAtPath:(NSNotification*)aNotification
+- (void)fileBrowserWillDelete:(NSNotification*)aNotification
 {
 	NSDictionary* userInfo = [aNotification userInfo];
-	NSString* path = userInfo[OakFileManagerPathKey];
+	NSString* path = userInfo[FileBrowserPathKey];
 
 	NSIndexSet* indexSet = [_documents indexesOfObjectsPassingTest:^BOOL(OakDocument* doc, NSUInteger idx, BOOL* stop){
 		return doc.isDocumentEdited == NO && path::is_child(to_s(doc.path), to_s(path));
 	}];
 
-	id oldFirstResponder = self.window.firstResponder;
-	[self closeTabsAtIndexes:indexSet askToSaveChanges:NO createDocumentIfEmpty:YES];
-	if(oldFirstResponder && oldFirstResponder != self.window.firstResponder)
-		[self.window makeFirstResponder:oldFirstResponder];
+	[self closeTabsAtIndexes:indexSet askToSaveChanges:NO createDocumentIfEmpty:YES activate:NO];
 }
 
-- (void)fileBrowserDidDuplicateAtURLs:(NSNotification*)aNotification
+- (void)fileBrowserDidDuplicate:(NSNotification*)aNotification
 {
 	NSDictionary* userInfo = [aNotification userInfo];
-	NSDictionary* urls = userInfo[OakFileBrowserURLMapKey];
+	NSDictionary* urls = userInfo[FileBrowserURLDictionaryKey];
 	for(NSURL* url in urls)
 	{
 		if([url.path isEqualToString:self.selectedDocument.path])
-			[self openItems:@[ @{ @"path" : [urls[url] path] } ] closingOtherTabs:NO];
+			[self openItems:@[ @{ @"path": [urls[url] path] } ] closingOtherTabs:NO activate:NO];
 	}
 }
 
@@ -812,33 +812,11 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	if(!self.fileBrowserVisible)
 		return;
 
-	if(NSString* folder = [self.fileBrowser directoryForNewItems])
+	if(NSURL* url = [self.fileBrowser newFile:self])
 	{
-		std::string path = "untitled";
-		std::string fileType = settings_for_path(NULL_STR, "attr.untitled", to_s(folder)).get(kSettingsFileTypeKey, "text.plain");
-		for(auto item : bundles::query(bundles::kFieldGrammarScope, fileType))
-		{
-			std::string const& ext = item->value_for_field(bundles::kFieldGrammarExtension);
-			if(ext != NULL_STR)
-				path = "untitled." + ext;
-		}
-
-		NSURL* url = [NSURL fileURLWithPath:[NSString stringWithCxxString:path::unique(path::join([folder fileSystemRepresentation], path))]];
-		if([[OakFileManager sharedInstance] createFileAtURL:url view:self.fileBrowser.view])
-		{
-			OakDocument* doc = [OakDocumentController.sharedInstance documentWithPath:url.path];
-			doc.fileType = to_ns(fileType);
-
-			[self insertDocuments:@[ doc ] atIndex:_selectedTabIndex + 1 selecting:doc andClosing:self.disposableDocument ? @[ self.disposableDocument ] : nil];
-
-			// Using openAndSelectDocument: will move focus to OakTextView
-			[doc loadModalForWindow:nil completionHandler:^(OakDocumentIOResult result, NSString* errorMessage, oak::uuid_t const& filterUUID){
-				self.selectedDocument = doc;
-				[doc close];
-			}];
-
-			[self.fileBrowser editURL:url];
-		}
+		OakDocument* doc = [OakDocumentController.sharedInstance documentWithPath:url.path];
+		[self insertDocuments:@[ doc ] atIndex:_selectedTabIndex + 1 selecting:doc andClosing:self.disposableDocument ? @[ self.disposableDocument ] : nil];
+		[self openAndSelectDocument:doc activate:NO];
 	}
 }
 
@@ -871,6 +849,27 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	if(_selectedTabIndex < _documents.count && is_disposable(_documents[_selectedTabIndex]))
 		return _documents[_selectedTabIndex].identifier;
 	return nil;
+}
+
+- (BOOL)documents:(NSArray<OakDocument*>*)lhs hasCommonSubsequenceWithDocuments:(NSArray<OakDocument*>*)rhs
+{
+	NSMutableSet<NSUUID*>* subsequence = [NSMutableSet setWithArray:[lhs valueForKey:@"identifier"]];
+	[subsequence intersectSet:[NSSet setWithArray:[rhs valueForKey:@"identifier"]]];
+
+	NSUInteger i = 0, j = 0;
+	while(i < lhs.count && j < rhs.count)
+	{
+		if(![subsequence containsObject:lhs[i].identifier])
+			++i;
+		else if(![subsequence containsObject:rhs[j].identifier])
+			++j;
+		else if(![lhs[i].identifier isEqual:rhs[j].identifier])
+			return NO;
+		++i;
+		++j;
+	}
+
+	return YES;
 }
 
 - (void)insertDocuments:(NSArray<OakDocument*>*)documents atIndex:(NSInteger)index selecting:(OakDocument*)selectDocument andClosing:(NSArray<NSUUID*>*)closeDocuments
@@ -906,11 +905,15 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 		[newDocuments addObject:_documents[i]];
 	}
 
-	self.documents        = newDocuments;
-	self.selectedTabIndex = [_documents indexOfObject:selectDocument];
+	[NSAnimationContext runAnimationGroup:^(NSAnimationContext* context){
+		context.allowsImplicitAnimation = [self documents:self.documents hasCommonSubsequenceWithDocuments:newDocuments];
+		self.documents        = newDocuments;
+		self.selectedTabIndex = [_documents indexOfObject:selectDocument];
+	} completionHandler:^{
+	}];
 }
 
-- (void)openItems:(NSArray*)items closingOtherTabs:(BOOL)closeOtherTabsFlag
+- (void)openItems:(NSArray*)items closingOtherTabs:(BOOL)closeOtherTabsFlag activate:(BOOL)activateFlag
 {
 	NSMutableArray<OakDocument*>* documents = [NSMutableArray array];
 	for(NSDictionary* item in items)
@@ -948,7 +951,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	}
 
 	[self insertDocuments:documents atIndex:_selectedTabIndex + 1 selecting:documents.lastObject andClosing:tabsToClose];
-	[self openAndSelectDocument:documents.lastObject];
+	[self openAndSelectDocument:documents.lastObject activate:activateFlag];
 
 	if(self.tabBarView && ![[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsDisableTabAutoCloseKey])
 	{
@@ -971,7 +974,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 					break;
 			}
 
-			[self closeTabsAtIndexes:indexSet askToSaveChanges:NO createDocumentIfEmpty:NO];
+			[self closeTabsAtIndexes:indexSet askToSaveChanges:NO createDocumentIfEmpty:NO activate:activateFlag];
 		}
 	}
 }
@@ -986,7 +989,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 		[textView performBundleItem:item];
 }
 
-- (void)openAndSelectDocument:(OakDocument*)document
+- (void)openAndSelectDocument:(OakDocument*)document activate:(BOOL)activateFlag
 {
 	[document loadModalForWindow:self.window completionHandler:^(OakDocumentIOResult result, NSString* errorMessage, oak::uuid_t const& filterUUID){
 		if(result == OakDocumentIOResultSuccess)
@@ -1036,7 +1039,9 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 				document.fileType = to_ns(settings_for_path(to_s(document.virtualPath ?: document.path), docAttributes, to_s(self.projectPath)).get(kSettingsFileTypeKey, "text.plain"));
 			}
 
-			[self makeTextViewFirstResponder:self];
+			if(activateFlag)
+				[self makeTextViewFirstResponder:self];
+
 			crash_reporter_info_t info("old selected document ‘%s’, new selected document ‘%s’", [_selectedDocument.displayName UTF8String] ?: "nil", [document.displayName UTF8String] ?: "nil");
 			self.selectedDocument = document;
 			[self performSelector:@selector(didOpenDocuemntInTextView:) withObject:self.documentView.textView afterDelay:0];
@@ -1050,7 +1055,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 			// Close the tab that failed to open
 			NSUInteger i = [_documents indexOfObject:document];
 			if(i != NSNotFound)
-				[self closeTabsAtIndexes:[NSIndexSet indexSetWithIndex:i] askToSaveChanges:NO createDocumentIfEmpty:self.fileBrowserVisible];
+				[self closeTabsAtIndexes:[NSIndexSet indexSetWithIndex:i] askToSaveChanges:NO createDocumentIfEmpty:self.fileBrowserVisible activate:activateFlag];
 
 			if(_documents.count == 0)
 				[self close];
@@ -1157,7 +1162,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 					[self.window.attachedSheet orderOut:self];
 					if(filterUUID)
 							show_command_error(to_s(errorMessage), filterUUID, self.window);
-					else	[[NSAlert tmAlertWithMessageText:[NSString stringWithFormat:@"The document “%@” could not be saved.", document.displayName] informativeText:(errorMessage ?: @"Please check Console output for reason.") buttons:@"OK", nil] beginSheetModalForWindow:self.window modalDelegate:nil didEndSelector:NULL contextInfo:NULL];
+					else	[[NSAlert tmAlertWithMessageText:[NSString stringWithFormat:@"The document “%@” could not be saved.", document.displayName] informativeText:(errorMessage ?: @"Please check Console output for reason.") buttons:@"OK", nil] beginSheetModalForWindow:self.window completionHandler:nil];
 				}
 
 				if(callback)
@@ -1240,7 +1245,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 
 	if(aCommand.firstResponder == _fileBrowser)
 	{
-		NSURL* fileURL = [[_fileBrowser.selectedURLs filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"isFileURL == YES"]] firstObject];
+		NSURL* fileURL = _fileBrowser.selectedFileURLs.firstObject;
 		res = bundles::scope_variables(res);
 		res = variables_for_path(res, to_s(fileURL.path));
 	}
@@ -1491,7 +1496,17 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 
 	_documents = newDocuments;
 	if(_documents.count)
+	{
 		[self.tabBarView reloadData];
+		if(!self.tabBarView.selectedTabItem)
+			[self.tabBarView setSelectedTabIndex:MIN(_selectedTabIndex, _documents.count-1)];
+	}
+
+	if(@available(macos 10.12, *))
+	{
+		BOOL disableTabBarCollapsingKey = [NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsDisableTabBarCollapsingKey];
+		self.titlebarViewController.hidden = !disableTabBarCollapsingKey && self.documents.count <= 1;
+	}
 
 	[self updateFileBrowserStatus:self];
 	[self updateTouchBarButtons];
@@ -1541,7 +1556,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 - (void)setSelectedTabIndex:(NSUInteger)newSelectedTabIndex
 {
 	_selectedTabIndex = newSelectedTabIndex;
-	[self.tabBarView setSelectedTab:newSelectedTabIndex];
+	[self.tabBarView setSelectedTabIndex:newSelectedTabIndex];
 }
 
 - (void)setIdentifier:(NSUUID*)newIdentifier
@@ -1587,14 +1602,14 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	{
 		OakDocument* doc = [OakDocumentController.sharedInstance untitledDocument];
 		[self insertDocuments:@[ doc ] atIndex:[indexSet firstIndex] selecting:doc andClosing:nil];
-		[self openAndSelectDocument:doc];
+		[self openAndSelectDocument:doc activate:YES];
 	}
 }
 
 - (void)takeTabsToCloseFrom:(id)sender
 {
 	if(NSIndexSet* indexSet = [self tryObtainIndexSetFrom:sender])
-		[self closeTabsAtIndexes:indexSet askToSaveChanges:YES createDocumentIfEmpty:YES];
+		[self closeTabsAtIndexes:indexSet askToSaveChanges:YES createDocumentIfEmpty:YES activate:YES];
 }
 
 - (void)takeTabsToTearOffFrom:(id)sender
@@ -1608,9 +1623,9 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 			controller.documents = documents;
 			if(path::is_child(to_s(documents.firstObject.path), to_s(self.projectPath)))
 				controller.defaultProjectPath = self.projectPath;
-			[controller openAndSelectDocument:documents.firstObject];
+			[controller openAndSelectDocument:documents.firstObject activate:YES];
 			[controller showWindow:self];
-			[self closeTabsAtIndexes:indexSet askToSaveChanges:NO createDocumentIfEmpty:YES];
+			[self closeTabsAtIndexes:indexSet askToSaveChanges:NO createDocumentIfEmpty:YES activate:YES];
 		}
 	}
 }
@@ -1669,7 +1684,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 
 - (BOOL)tabBarView:(OakTabBarView*)aTabBarView shouldSelectIndex:(NSUInteger)anIndex
 {
-	[self openAndSelectDocument:_documents[anIndex]];
+	[self openAndSelectDocument:_documents[anIndex] activate:YES];
 	self.selectedTabIndex = anIndex;
 	return YES;
 }
@@ -1706,13 +1721,13 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 				BOOL wasSelected = [tabItem.identifier isEqual:sourceTabBar.selectedTabItem.identifier];
 
 				if(delegate.fileBrowserVisible || delegate.documents.count > 1)
-						[delegate closeTabsAtIndexes:[NSIndexSet indexSetWithIndex:dragIndex] askToSaveChanges:NO createDocumentIfEmpty:YES];
+						[delegate closeTabsAtIndexes:[NSIndexSet indexSetWithIndex:dragIndex] askToSaveChanges:NO createDocumentIfEmpty:YES activate:YES];
 				else	[delegate close];
 
 				if(wasSelected)
 				{
 					self.selectedTabIndex = [self.documents indexOfObject:srcDocument];
-					[self openAndSelectDocument:srcDocument];
+					[self openAndSelectDocument:srcDocument activate:YES];
 				}
 
 				return YES;
@@ -1723,26 +1738,26 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	return YES;
 }
 
-- (IBAction)selectNextTab:(id)sender            { self.selectedTabIndex = (_selectedTabIndex + 1) % _documents.count;                    [self openAndSelectDocument:_documents[_selectedTabIndex]]; }
-- (IBAction)selectPreviousTab:(id)sender        { self.selectedTabIndex = (_selectedTabIndex + _documents.count - 1) % _documents.count; [self openAndSelectDocument:_documents[_selectedTabIndex]]; }
-- (IBAction)takeSelectedTabIndexFrom:(id)sender { self.selectedTabIndex = [sender tag];                                                  [self openAndSelectDocument:_documents[_selectedTabIndex]]; }
+- (IBAction)selectNextTab:(id)sender            { self.selectedTabIndex = (_selectedTabIndex + 1) % _documents.count;                    [self openAndSelectDocument:_documents[_selectedTabIndex] activate:YES]; }
+- (IBAction)selectPreviousTab:(id)sender        { self.selectedTabIndex = (_selectedTabIndex + _documents.count - 1) % _documents.count; [self openAndSelectDocument:_documents[_selectedTabIndex] activate:YES]; }
+- (IBAction)takeSelectedTabIndexFrom:(id)sender { self.selectedTabIndex = [sender tag];                                                  [self openAndSelectDocument:_documents[_selectedTabIndex] activate:YES]; }
 
 // ==================
 // = OakFileBrowser =
 // ==================
 
-- (void)fileBrowser:(OakFileBrowser*)aFileBrowser openURLs:(NSArray*)someURLs
+- (void)fileBrowser:(FileBrowserViewController*)fileBrowser openURLs:(NSArray*)someURLs
 {
 	NSMutableArray* items = [NSMutableArray array];
 	for(NSURL* url in someURLs)
 	{
 		if([url isFileURL])
-			[items addObject:@{ @"path" : [url path] }];
+			[items addObject:@{ @"path": [url path] }];
 	}
-	[self openItems:items closingOtherTabs:OakIsAlternateKeyOrMouseEvent()];
+	[self openItems:items closingOtherTabs:OakIsAlternateKeyOrMouseEvent() activate:YES];
 }
 
-- (void)fileBrowser:(OakFileBrowser*)aFileBrowser closeURL:(NSURL*)anURL
+- (void)fileBrowser:(FileBrowserViewController*)fileBrowser closeURL:(NSURL*)anURL
 {
 	if(![anURL isFileURL])
 		return;
@@ -1750,7 +1765,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	NSIndexSet* indexSet = [_documents indexesOfObjectsPassingTest:^BOOL(OakDocument* doc, NSUInteger idx, BOOL* stop){
 		return [doc.path isEqualToString:anURL.path];
 	}];
-	[self closeTabsAtIndexes:indexSet askToSaveChanges:YES createDocumentIfEmpty:YES];
+	[self closeTabsAtIndexes:indexSet askToSaveChanges:YES createDocumentIfEmpty:YES activate:NO];
 }
 
 - (void)setFileBrowserVisible:(BOOL)makeVisibleFlag
@@ -1760,33 +1775,28 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 		_fileBrowserVisible = makeVisibleFlag;
 		if(!self.fileBrowser && makeVisibleFlag)
 		{
-			self.fileBrowser = [OakFileBrowser new];
+			self.fileBrowser = [[FileBrowserViewController alloc] init];
 			self.fileBrowser.delegate = self;
 			[self.fileBrowser setupViewWithState:_fileBrowserHistory];
 			if(self.projectPath && !_fileBrowserHistory)
-				self.fileBrowser.url = [NSURL fileURLWithPath:self.projectPath];
+				[self.fileBrowser goToURL:[NSURL fileURLWithPath:self.projectPath]];
 			[self updateFileBrowserStatus:self];
-			if(self.layoutView.tabsAboveDocument)
-				[self.tabBarView expand];
 
-			[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(fileBrowserDidDuplicateAtURLs:) name:OakFileBrowserDidDuplicateURLs object:_fileBrowser];
+			[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(fileBrowserDidDuplicate:) name:FileBrowserDidDuplicateNotification object:nil];
 		}
 
 		if(!makeVisibleFlag && [[self.window firstResponder] isKindOfClass:[NSView class]] && [(NSView*)[self.window firstResponder] isDescendantOf:self.layoutView.fileBrowserView])
 			[self makeTextViewFirstResponder:self];
 
-		self.layoutView.fileBrowserView       = makeVisibleFlag ? self.fileBrowser.view : nil;
-		self.layoutView.fileBrowserHeaderView = makeVisibleFlag ? self.fileBrowser.headerView : nil;
+		self.layoutView.fileBrowserView = makeVisibleFlag ? self.fileBrowser.view : nil;
 
 		if(makeVisibleFlag)
 		{
-			self.fileBrowser.nextResponder = self.fileBrowser.view.nextResponder;
-			self.fileBrowser.view.nextResponder = self.fileBrowser;
 			if(self.autoRevealFile && self.selectedDocument.path)
 				[self revealFileInProject:self];
 		}
 
-		if(!self.disableFileBrowserWindowResize && ([self.window styleMask] & NSFullScreenWindowMask) != NSFullScreenWindowMask)
+		if(!self.disableFileBrowserWindowResize && ([self.window styleMask] & NSWindowStyleMaskFullScreen) != NSWindowStyleMaskFullScreen)
 		{
 			NSRect windowFrame = self.window.frame;
 
@@ -1851,23 +1861,23 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 - (CGFloat)fileBrowserWidth                 { return self.layoutView.fileBrowserWidth;   }
 - (void)setFileBrowserWidth:(CGFloat)aWidth { self.layoutView.fileBrowserWidth = aWidth; }
 
-- (IBAction)newFolder:(id)sender            { if(self.fileBrowser) [NSApp sendAction:_cmd to:self.fileBrowser from:sender]; }
-- (IBAction)reload:(id)sender               { if(self.fileBrowser) [NSApp sendAction:_cmd to:self.fileBrowser from:sender]; }
-- (IBAction)deselectAll:(id)sender          { if(self.fileBrowser) [NSApp sendAction:_cmd to:self.fileBrowser from:sender]; }
+- (IBAction)newFolder:(id)sender            { if(self.fileBrowser) [self.fileBrowser newFolder:sender];   }
+- (IBAction)reload:(id)sender               { if(self.fileBrowser) [self.fileBrowser reload:sender];      }
+- (IBAction)deselectAll:(id)sender          { if(self.fileBrowser) [self.fileBrowser deselectAll:sender]; }
 
 - (IBAction)revealFileInProject:(id)sender  { if(self.selectedDocument) { self.fileBrowserVisible = YES; [self.fileBrowser selectURL:[NSURL fileURLWithPath:self.selectedDocument.path] withParentURL:self.projectPath ? [NSURL fileURLWithPath:self.projectPath] : nil]; } }
 - (IBAction)goToProjectFolder:(id)sender    { self.fileBrowserVisible = YES; [self.fileBrowser goToURL:[NSURL fileURLWithPath:self.projectPath]]; }
 
-- (IBAction)goBack:(id)sender               { self.fileBrowserVisible = YES; [NSApp sendAction:_cmd to:self.fileBrowser from:sender]; }
-- (IBAction)goForward:(id)sender            { self.fileBrowserVisible = YES; [NSApp sendAction:_cmd to:self.fileBrowser from:sender]; }
-- (IBAction)goToParentFolder:(id)sender     { self.fileBrowserVisible = YES; [NSApp sendAction:_cmd to:self.fileBrowser from:sender]; }
+- (IBAction)goBack:(id)sender               { self.fileBrowserVisible = YES; [self.fileBrowser goBack:sender];               }
+- (IBAction)goForward:(id)sender            { self.fileBrowserVisible = YES; [self.fileBrowser goForward:sender];            }
+- (IBAction)goToParentFolder:(id)sender     { self.fileBrowserVisible = YES; [self.fileBrowser goToParentFolder:sender];     }
 
-- (IBAction)goToComputer:(id)sender         { self.fileBrowserVisible = YES; [NSApp sendAction:_cmd to:self.fileBrowser from:sender]; }
-- (IBAction)goToHome:(id)sender             { self.fileBrowserVisible = YES; [NSApp sendAction:_cmd to:self.fileBrowser from:sender]; }
-- (IBAction)goToDesktop:(id)sender          { self.fileBrowserVisible = YES; [NSApp sendAction:_cmd to:self.fileBrowser from:sender]; }
-- (IBAction)goToFavorites:(id)sender        { self.fileBrowserVisible = YES; [NSApp sendAction:_cmd to:self.fileBrowser from:sender]; }
-- (IBAction)goToSCMDataSource:(id)sender    { self.fileBrowserVisible = YES; [NSApp sendAction:_cmd to:self.fileBrowser from:sender]; }
-- (IBAction)orderFrontGoToFolder:(id)sender { self.fileBrowserVisible = YES; [NSApp sendAction:_cmd to:self.fileBrowser from:sender]; }
+- (IBAction)goToComputer:(id)sender         { self.fileBrowserVisible = YES; [self.fileBrowser goToComputer:sender];         }
+- (IBAction)goToHome:(id)sender             { self.fileBrowserVisible = YES; [self.fileBrowser goToHome:sender];             }
+- (IBAction)goToDesktop:(id)sender          { self.fileBrowserVisible = YES; [self.fileBrowser goToDesktop:sender];          }
+- (IBAction)goToFavorites:(id)sender        { self.fileBrowserVisible = YES; [self.fileBrowser goToFavorites:sender];        }
+- (IBAction)goToSCMDataSource:(id)sender    { self.fileBrowserVisible = YES; [self.fileBrowser goToSCMDataSource:sender];    }
+- (IBAction)orderFrontGoToFolder:(id)sender { self.fileBrowserVisible = YES; [self.fileBrowser orderFrontGoToFolder:sender]; }
 
 // ===============
 // = HTML Output =
@@ -1961,14 +1971,14 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	Find* find = [Find sharedInstance];
 	find.documentIdentifier = self.selectedDocumentUUID;
 	find.projectFolder      = self.projectPath ?: self.untitledSavePath ?: NSHomeDirectory();
-	find.projectIdentifier  = self.identifier;
+	find.delegate           = self;
 
 	NSArray* items;
 	if(self.fileBrowserVisible)
 	{
-		items = [[self.fileBrowser.selectedURLs filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"isFileURL == YES"]] valueForKey:@"path"];
-		if(items.count == 0 && self.fileBrowser.path)
-			items = @[ self.fileBrowser.path ];
+		items = [self.fileBrowser.selectedFileURLs valueForKey:@"path"];
+		if(items.count == 0)
+			items = @[ self.fileBrowser.path ?: find.projectFolder ];
 	}
 	find.fileBrowserItems = items.count ? items : nil;
 
@@ -1978,7 +1988,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 - (IBAction)orderFrontFindPanel:(id)sender
 {
 	Find* find              = [Find sharedInstance];
-	BOOL didOwnDialog       = [find.projectIdentifier isEqual:self.identifier];
+	BOOL didOwnDialog       = find.delegate == self;
 	[self prepareAndReturnFindPanel];
 
 	NSInteger mode = [sender respondsToSelector:@selector(tag)] ? [sender tag] : find_tags::in_document;
@@ -2019,6 +2029,17 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	[runCommand showWindow:nil];
 }
 
+// ================
+// = FindDelegate =
+// ================
+
+- (void)selectRange:(text::range_t const&)range inDocument:(OakDocument*)aDocument
+{
+	if(range != text::range_t::undefined)
+		aDocument.selection = to_ns(range);
+	[self openItems:@[ @{ @"identifier": aDocument.identifier.UUIDString } ] closingOtherTabs:NO activate:YES];
+}
+
 // ==================
 // = OakFileChooser =
 // ==================
@@ -2051,7 +2072,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 - (void)fileChooserDidSelectItems:(FileChooser*)sender
 {
 	ASSERT([sender respondsToSelector:@selector(selectedItems)]);
-	[self openItems:[sender selectedItems] closingOtherTabs:OakIsAlternateKeyOrMouseEvent()];
+	[self openItems:[sender selectedItems] closingOtherTabs:OakIsAlternateKeyOrMouseEvent() activate:YES];
 }
 
 // ===========
@@ -2073,21 +2094,10 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 
 - (NSString*)untitledSavePath
 {
-	NSString* res = self.projectPath ?: [self.selectedDocument.path stringByDeletingLastPathComponent];
+	NSString* res;
 	if(self.fileBrowserVisible)
-	{
-		NSArray* selectedURLs = self.fileBrowser.selectedURLs;
-		if([selectedURLs count] == 1 && [[selectedURLs lastObject] isFileURL])
-		{
-			NSString* path = [[selectedURLs lastObject] path];
-			res = path::is_directory(to_s(path)) ? path : [path stringByDeletingLastPathComponent];
-		}
-		else if(NSString* folder = self.fileBrowser.path)
-		{
-			res = folder;
-		}
-	}
-	return res;
+		res = self.fileBrowser.outlineView.numberOfSelectedRows == 1 ? self.fileBrowser.directoryURLForNewItems.path : self.fileBrowser.path;
+	return res ?: self.projectPath ?: [self.selectedDocument.path stringByDeletingLastPathComponent];
 }
 
 - (BOOL)treatAsProjectWindow
@@ -2141,7 +2151,7 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	std::string const customCandidate = settings.get(kSettingsRelatedFilePathKey, NULL_STR);
 
 	if(customCandidate != NULL_STR && customCandidate != documentPath && ([_documents indexOfObjectPassingTest:^BOOL(OakDocument* doc, NSUInteger, BOOL*){ return customCandidate == to_s(doc.path); }] != NSNotFound || path::exists(customCandidate)))
-		return [self openItems:@[ @{ @"path" : [NSString stringWithCxxString:customCandidate] } ] closingOtherTabs:NO];
+		return [self openItems:@[ @{ @"path": [NSString stringWithCxxString:customCandidate] } ] closingOtherTabs:NO activate:YES];
 
 	for(auto const& entry : path::entries(documentDir))
 	{
@@ -2175,14 +2185,14 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 	ASSERT(it != v.end());
 
 	NSString* path = [NSString stringWithCxxString:path::join(documentDir, v[((it - v.begin()) + 1) % v.size()])];
-	[self openItems:@[ @{ @"path" : path } ] closingOtherTabs:NO];
+	[self openItems:@[ @{ @"path": path } ] closingOtherTabs:NO activate:YES];
 }
 
-// ============================
-// = Select Tab Menu Delegate =
-// ============================
+// ==========================
+// = Show Tab Menu Delegate =
+// ==========================
 
-- (void)updateSelectTabMenu:(NSMenu*)aMenu
+- (void)updateShowTabMenu:(NSMenu*)aMenu
 {
 	if(![self.window isKeyWindow])
 	{
@@ -2239,7 +2249,10 @@ static NSArray* const kObservedKeyPaths = @[ @"arrayController.arrangedObjects.p
 		active = !self.htmlOutputInWindow || self.htmlOutputWindowController;
 	}
 	else if([menuItem action] == @selector(newDocumentInDirectory:))
-		active = self.fileBrowserVisible && [self.fileBrowser directoryForNewItems] != nil;
+	{
+		active = self.fileBrowserVisible && self.fileBrowser.directoryURLForNewItems;
+		[menuItem setDynamicTitle:active ? [NSString stringWithFormat:@"New File in “%@”", [NSFileManager.defaultManager displayNameAtPath:self.fileBrowser.directoryURLForNewItems.path]] : @"New File"];
+	}
 	else if(delegateToFileBrowser.find([menuItem action]) != delegateToFileBrowser.end())
 		active = self.fileBrowserVisible && [self.fileBrowser validateMenuItem:menuItem];
 	else if([menuItem action] == @selector(moveDocumentToNewWindow:))
@@ -2362,65 +2375,6 @@ static NSTouchBarItemIdentifier kTouchBarFavoritesItemIdentifier = @"com.macroma
 		case 0: [self selectPreviousTab:control]; break;
 		case 1: [self selectNextTab:control];     break;
 	}
-}
-
-// =============
-// = QuickLook =
-// =============
-
-// QLPreviewPanelController
-
-- (BOOL)acceptsPreviewPanelControl:(QLPreviewPanel*)panel
-{
-	return self.fileBrowserVisible && [self.fileBrowser.selectedURLs count];
-}
-
-- (void)beginPreviewPanelControl:(QLPreviewPanel*)panel
-{
-	[QLPreviewPanel sharedPreviewPanel].delegate   = self;
-	[QLPreviewPanel sharedPreviewPanel].dataSource = self;
-
-	self.urlArrayForQuickLook = self.fileBrowser.selectedURLs;
-}
-
-- (void)endPreviewPanelControl:(QLPreviewPanel*)panel
-{
-	self.urlArrayForQuickLook = nil;
-}
-
-// QLPreviewPanelDelegate
-
-- (NSRect)previewPanel:(QLPreviewPanel*)panel sourceFrameOnScreenForPreviewItem:(id <QLPreviewItem>)item
-{
-	return [_fileBrowser iconFrameForURL:item.previewItemURL];
-}
-
-- (BOOL)previewPanel:(QLPreviewPanel*)panel handleEvent:(NSEvent*)event
-{
-	if([event type] == NSKeyDown)
-	{
-		[self.fileBrowser.outlineView keyDown:event];
-		NSArray* newSelection = self.fileBrowser.selectedURLs;
-		if(![newSelection isEqualToArray:self.urlArrayForQuickLook])
-		{
-			self.urlArrayForQuickLook = newSelection;
-			[panel reloadData];
-		}
-		return YES;
-	}
-	return NO;
-}
-
-// QLPreviewPanelDataSource
-
-- (NSInteger)numberOfPreviewItemsInPreviewPanel:(QLPreviewPanel*)panel
-{
-	return self.urlArrayForQuickLook.count;
-}
-
-- (id <QLPreviewItem>)previewPanel:(QLPreviewPanel*)panel previewItemAtIndex:(NSInteger)index
-{
-	return [[QuickLookNSURLWrapper alloc] initWithURL:self.urlArrayForQuickLook[index]];
 }
 
 // ======================
@@ -2555,7 +2509,7 @@ static NSUInteger DisableSessionSavingCount = 0;
 	self.documents        = documents;
 	self.selectedTabIndex = selectedTabIndex;
 
-	[self openAndSelectDocument:documents[selectedTabIndex]];
+	[self openAndSelectDocument:documents[selectedTabIndex] activate:YES];
 }
 
 - (NSDictionary*)sessionInfoIncludingUntitledDocuments:(BOOL)includeUntitled
@@ -2567,7 +2521,7 @@ static NSUInteger DisableSessionSavingCount = 0;
 	if(NSDictionary* history = self.fileBrowserHistory)
 		res[@"fileBrowserState"] = history;
 
-	if(([self.window styleMask] & NSFullScreenWindowMask) == NSFullScreenWindowMask)
+	if(([self.window styleMask] & NSWindowStyleMaskFullScreen) == NSWindowStyleMaskFullScreen)
 		res[@"fullScreen"] = @YES;
 	else if(self.window.isZoomed)
 		res[@"zoomed"] = @YES;
@@ -2626,7 +2580,7 @@ static NSUInteger DisableSessionSavingCount = 0;
 	for(DocumentWindowController* controller in [controllers reverseObjectEnumerator])
 		[projects addObject:[controller sessionInfoIncludingUntitledDocuments:includeUntitled]];
 
-	NSDictionary* session = @{ @"projects" : projects };
+	NSDictionary* session = @{ @"projects": projects };
 	return [session writeToFile:[self sessionPath] atomically:YES];
 }
 
@@ -2691,7 +2645,20 @@ static NSUInteger DisableSessionSavingCount = 0;
 - (void)bringToFront
 {
 	[self showWindow:nil];
-	if(![NSApp isActive])
+	if(NSApp.isActive)
+	{
+		// If we call ‘mate -w’ in quick succession there is a chance that we have a pending “re-activate the terminal app” when this code is executed, which will make ‘isActive’ return ‘YES’ but shortly after, our application will become inactive. For this reason, we monitor the NSApplicationDidResignActiveNotification for 200 ms and re-activate TextMate if we see the notification.
+
+		__weak __block id observerId = [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidResignActiveNotification object:NSApp queue:nil usingBlock:^(NSNotification*){
+			[[NSNotificationCenter defaultCenter] removeObserver:observerId];
+			[NSApp activateIgnoringOtherApps:YES];
+		}];
+
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 5), dispatch_get_main_queue(), ^{
+			[[NSNotificationCenter defaultCenter] removeObserver:observerId];
+		});
+	}
+	else
 	{
 		__weak __block id observerId = [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidBecomeActiveNotification object:NSApp queue:nil usingBlock:^(NSNotification*){
 			// If our window is not on the active desktop but another one is, the system gives focus to the wrong window.
@@ -2806,7 +2773,7 @@ static NSUInteger DisableSessionSavingCount = 0;
 		[controller bringToFront];
 	else if(![controller.window isVisible])
 		[controller.window orderWindow:NSWindowBelow relativeTo:[([NSApp keyWindow] ?: [NSApp mainWindow]) windowNumber]];
-	[controller openAndSelectDocument:aDocument];
+	[controller openAndSelectDocument:aDocument activate:YES];
 }
 
 - (void)showDocuments:(NSArray<OakDocument*>*)someDocument
@@ -2814,9 +2781,13 @@ static NSUInteger DisableSessionSavingCount = 0;
 	if(someDocument.count == 0)
 		return;
 
-	DocumentWindowController* controller = [self controllerWithDocuments:someDocument project:nil];
+	NSUUID* projectUUID = nil;
+	if(NSEvent.modifierFlags & NSEventModifierFlagOption)
+		projectUUID = [[NSUUID alloc] initWithUUIDString:@"00000000-0000-0000-0000-000000000000"];
+
+	DocumentWindowController* controller = [self controllerWithDocuments:someDocument project:projectUUID];
 	[controller bringToFront];
-	[controller openAndSelectDocument:controller.documents[controller.selectedTabIndex]];
+	[controller openAndSelectDocument:controller.documents[controller.selectedTabIndex] activate:YES];
 
 	// If we launch TextMate with a document to open and there are also session to restore
 	// then the document window ends up behind all the other windows, despite being active
@@ -2864,9 +2835,9 @@ static NSUInteger DisableSessionSavingCount = 0;
 		controller.defaultProjectPath = folder;
 		controller.fileBrowserVisible = YES;
 		controller.documents          = @[ [OakDocumentController.sharedInstance untitledDocument] ];
-		controller.fileBrowser.url    = [NSURL fileURLWithPath:folder];
 
-		[controller openAndSelectDocument:controller.documents[controller.selectedTabIndex]];
+		[controller.fileBrowser goToURL:[NSURL fileURLWithPath:folder]];
+		[controller openAndSelectDocument:controller.documents[controller.selectedTabIndex] activate:YES];
 	}
 	[controller bringToFront];
 }

@@ -28,11 +28,11 @@ static NSButton* OakSmallButton (NSString* title, SEL action, id target, NSInteg
 {
 	NSButton* res = OakCreateButton(title);
 	[res setContentCompressionResistancePriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
-	res.font             = [NSFont messageFontOfSize:[NSFont smallSystemFontSize]];
-	res.cell.controlSize = NSSmallControlSize;
-	res.action           = action;
-	res.target           = target;
-	res.tag              = tag;
+	res.font        = [NSFont messageFontOfSize:[NSFont systemFontSizeForControlSize:NSControlSizeSmall]];
+	res.controlSize = NSControlSizeSmall;
+	res.action      = action;
+	res.target      = target;
+	res.tag         = tag;
 	return res;
 }
 
@@ -58,7 +58,7 @@ static NSButton* OakSmallButton (NSString* title, SEL action, id target, NSInteg
 		return;
 	_didLoadView = YES;
 
-	self.divider           = OakCreateHorizontalLine([NSColor colorWithCalibratedWhite:0.500 alpha:1], [NSColor colorWithCalibratedWhite:0.750 alpha:1]);
+	self.divider           = OakCreateHorizontalLine(OakBackgroundFillViewStyleDivider);
 	self.label             = OakCreateLabel(self.labelString);
 	self.neverButton       = OakSmallButton(@"Never", @selector(didClickButton:), self, SelectGrammarResponseNever);
 	self.notNowButton      = OakSmallButton(@"Not Now", @selector(didClickButton:), self, SelectGrammarResponseNotNow);
@@ -68,19 +68,19 @@ static NSButton* OakSmallButton (NSString* title, SEL action, id target, NSInteg
 	[_label setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
 
 	_progressIndicator = [NSProgressIndicator new];
-	_progressIndicator.controlSize          = NSSmallControlSize;
+	_progressIndicator.controlSize          = NSControlSizeSmall;
 	_progressIndicator.maxValue             = 1;
 	_progressIndicator.indeterminate        = YES;
 	_progressIndicator.displayedWhenStopped = NO;
 	_progressIndicator.bezeled              = NO;
 
 	NSDictionary* views = @{
-		@"divider"  : self.divider,
-		@"label"    : self.label,
-		@"progress" : self.progressIndicator,
-		@"never"    : self.neverButton,
-		@"notNow"   : self.notNowButton,
-		@"install"  : self.installButton,
+		@"divider":  self.divider,
+		@"label":    self.label,
+		@"progress": self.progressIndicator,
+		@"never":    self.neverButton,
+		@"notNow":   self.notNowButton,
+		@"install":  self.installButton,
 	};
 
 	self.view = [[NSView alloc] initWithFrame:NSZeroRect];
@@ -95,10 +95,10 @@ static NSButton* OakSmallButton (NSString* title, SEL action, id target, NSInteg
 
 	self.neverButton.hidden = YES;
 
-	_eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSFlagsChangedMask handler:^NSEvent*(NSEvent* event){
-		NSUInteger modifierFlags = [self.view.window isKeyWindow] ? ([event modifierFlags] & (NSShiftKeyMask|NSControlKeyMask|NSAlternateKeyMask|NSCommandKeyMask)) : 0;
-		self.neverButton.hidden  = modifierFlags != NSAlternateKeyMask;
-		self.notNowButton.hidden = modifierFlags == NSAlternateKeyMask;
+	_eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged handler:^NSEvent*(NSEvent* event){
+		NSUInteger modifierFlags = [self.view.window isKeyWindow] ? ([event modifierFlags] & (NSEventModifierFlagShift|NSEventModifierFlagControl|NSEventModifierFlagOption|NSEventModifierFlagCommand)) : 0;
+		self.neverButton.hidden  = modifierFlags != NSEventModifierFlagOption;
+		self.notNowButton.hidden = modifierFlags == NSEventModifierFlagOption;
 		return event;
 	}];
 }
@@ -110,7 +110,6 @@ static NSButton* OakSmallButton (NSString* title, SEL action, id target, NSInteg
 	self.callback     = callback;
 
 	[_documentView addAuxiliaryView:self.view atEdge:NSMaxYEdge];
-	self.nextResponder = _documentView;
 }
 
 - (void)dismiss

@@ -2,6 +2,48 @@ Title: Release Notes
 
 # Changes
 
+## 2018-12-06 (v2.0-rc.22)
+
+* Improve UI for tagging files (file browser action menu). *[Ronald Wampler]*
+* See [all changes since v2.0-rc.20](https://github.com/textmate/textmate/compare/v2.0-rc.20...v2.0-rc.22)
+
+## 2018-12-02 (v2.0-rc.20)
+
+* Document tabs now use “titlebar material” to be a better fit for macOS 10.14.
+* Status bar font size has been increased to 12 pt and can be changed by using `defaults write com.macromates.TextMate statusBarFontSize 13`.
+* See [all changes since v2.0-rc.18](https://github.com/textmate/textmate/compare/v2.0-rc.18...v2.0-rc.20)
+
+## 2018-11-14 (v2.0-rc.18)
+
+* If you run `defaults write com.macromates.TextMate changeThemeBasedOnAppearance -bool YES` then TextMate will switch theme based on appearance (light/dark). The themes used can be controlled using the `darkModeThemeUUID` and `universalThemeUUID` defaults keys. *[Ronald Wampler]*
+* The document tabs have been moved to the titlebar, this means that file browser header can no longer be merged with the tab bar, automatically hiding the tab bar (when there is only one tab) is only possible when running macOS 10.12 or later, and currently the light tabs do not match the title bar background color on 10.14. The last one will be fixed in an upcoming build (to have active tab use “titlebar material”). The first one is probably not coming back anytime soon.
+* See [all changes since v2.0-rc.15](https://github.com/textmate/textmate/compare/v2.0-rc.15...v2.0-rc.18)
+
+## 2018-11-02 (v2.0-rc.15)
+
+* Blurred backgrounds and other visual tweaks, but more to come…
+* See [all changes since v2.0-rc.14](https://github.com/textmate/textmate/compare/v2.0-rc.14...v2.0-rc.15)
+
+## 2018-11-01 (v2.0-rc.14)
+
+* Holding down option (⌥) when opening a file will ensure it opens in a new window (instead of existing project).
+* File browser now supports setting multiple tags on items instead of the previous single label system. *[Ronald Wampler]*
+* It is possible to set `excludeSCMDeleted = true` in a `.tm_properties` file to hide the “ghost” items that appear after deleting a file on disk which is still tracked by your version control system. *[Ian Gregory]*
+* To have file packages expandable in the file browser (like directories) run: `defaults write com.macromates.TextMate allowExpandingPackages -bool YES`. If you do work with a lot of file packages be aware that it is also possible to hold option (⌥) when you either double-click the item’s label or single click the icon, to descend into the file package.
+* The list of default file globs used when searching folders can be set, for example `defaults write com.macromates.TextMate defaultFindInFolderGlobs '( "{*,.tm_properties}", "*" )'`. Be aware that unique history is kept per folder, to clear your existing history run: `defaults delete com.macromates.TextMate 'Find in Folder Globs'`.
+* The behavior of control up/down has changed slightly: Previously these keys would (also) “skip” the current paired sequence when next to an opening/closing character, for example pressing control down with `foo‸(bar);` would move the insertion point past the braces, i.e.: `foo(bar)‸;`. This is no longer the case, and the keys will always move to the opening/closing character of the current pair that the insertion point is inside.
+* File browser has seen major overhaul: Little difference from the user’s POV but the performance characteristics may have changed slightly, please report any issues to the [mailing list or support](https://macromates.com/support). Furthermore, we no longer support saved searches, alias files, inline-expansion of recursive symbolic link (beyond the first), and setting the file browser to render as a “source list” has also been dropped. If you miss any of these things, please let us know.
+* Dark mode support: Some minor issues still to be addressed, most noticeable is probably main window’s title bar, find dialog’s search/replace strings when enabling regular expression searching, and of course this window :)
+* See [all changes since v2.0-rc.10](https://github.com/textmate/textmate/compare/v2.0-rc.10...v2.0-rc.14)
+
+## 2018-06-11 (v2.0-rc.10)
+
+* It is now possible to scroll project/folder search results horizontally.
+* Fixed misclassification of file encoding for documents saved with TextEdit. *[Ronald Wampler]*
+* Fixed potential deadlock when using ⇧⌘T just after loading a new document.
+* Fixed an issue where setting a mark (in the gutter) via `mate` could cause TextMate to crash.
+* See [all changes since v2.0-rc.9](https://github.com/textmate/textmate/compare/v2.0-rc.9...v2.0-rc.10)
+
 ## 2018-04-02 (v2.0-rc.9)
 
 * TextMate’s QuickLook plug-in no longer claims `public.data` (files without extension). The idea was to support previewing files like `README` but a side-effect was that TextMate’s QuickLook plug-in became responsible for generating thumbnails for all binary files without a dedicated QuickLook plug-in (e.g. disk images or zip archives). There appears to be no way to dynamically opt out of thumbnail generation, therefor we’ve had to remove support for previewing files without extension.

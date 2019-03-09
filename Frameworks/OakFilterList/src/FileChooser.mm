@@ -200,12 +200,12 @@ static NSDictionary* globs_for_path (std::string const& path)
 	};
 
 	NSDictionary* res = @{
-		kSearchExcludeDirectoryGlobsKey : [NSMutableArray array],
-		kSearchExcludeFileGlobsKey      : [NSMutableArray array],
-		kSearchExcludeGlobsKey          : [NSMutableArray array],
-		kSearchDirectoryGlobsKey        : [NSMutableArray array],
-		kSearchFileGlobsKey             : [NSMutableArray array],
-		kSearchGlobsKey                 : [NSMutableArray array],
+		kSearchExcludeDirectoryGlobsKey: [NSMutableArray array],
+		kSearchExcludeFileGlobsKey:      [NSMutableArray array],
+		kSearchExcludeGlobsKey:          [NSMutableArray array],
+		kSearchDirectoryGlobsKey:        [NSMutableArray array],
+		kSearchFileGlobsKey:             [NSMutableArray array],
+		kSearchGlobsKey:                 [NSMutableArray array],
 	};
 
 	settings_t const settings = settings_for_path(NULL_STR, "", path);
@@ -253,56 +253,53 @@ static NSDictionary* globs_for_path (std::string const& path)
 		_sourceListLabels = @[ @"All", @"Open Documents", @"Uncommitted Documents" ];
 		_searchResults = [NSMutableArray array];
 
-		[self.window setContentBorderThickness:57 forEdge:NSMaxYEdge];
 		self.tableView.allowsMultipleSelection = YES;
 		self.tableView.rowHeight = 38;
 
 		OakScopeBarView* scopeBar = [OakScopeBarView new];
 		scopeBar.labels = self.sourceListLabels;
 
-		_progressIndicator = [[NSProgressIndicator alloc] initWithFrame:NSZeroRect];
-		_progressIndicator.style                = NSProgressIndicatorSpinningStyle;
-		_progressIndicator.controlSize          = NSSmallControlSize;
-		_progressIndicator.displayedWhenStopped = NO;
-
-		OakBackgroundFillView* aboveScopeBarDark  = OakCreateHorizontalLine([NSColor grayColor], [NSColor lightGrayColor]);
-		OakBackgroundFillView* aboveScopeBarLight = OakCreateHorizontalLine([NSColor colorWithCalibratedWhite:0.797 alpha:1], [NSColor colorWithCalibratedWhite:0.912 alpha:1]);
-		OakBackgroundFillView* topDivider         = OakCreateHorizontalLine([NSColor darkGrayColor], [NSColor colorWithCalibratedWhite:0.551 alpha:1]);
-		OakBackgroundFillView* bottomDivider      = OakCreateHorizontalLine([NSColor grayColor], [NSColor lightGrayColor]);
-
-		NSDictionary* views = @{
-			@"searchField"        : self.searchField,
-			@"aboveScopeBarDark"  : aboveScopeBarDark,
-			@"aboveScopeBarLight" : aboveScopeBarLight,
-			@"scopeBar"           : scopeBar,
-			@"topDivider"         : topDivider,
-			@"scrollView"         : self.scrollView,
-			@"bottomDivider"      : bottomDivider,
-	 		@"statusTextField"    : self.statusTextField,
-			@"itemCountTextField" : self.itemCountTextField,
-			@"progressIndicator"  : _progressIndicator,
+		NSDictionary* titlebarViews = @{
+			@"searchField": self.searchField,
+			@"dividerView": [self makeDividerView],
+			@"scopeBar":    scopeBar,
 		};
 
-		NSView* contentView = self.window.contentView;
-		OakAddAutoLayoutViewsToSuperview([views allValues], contentView);
+		NSView* titlebarView = [[NSView alloc] initWithFrame:NSZeroRect];
+		OakAddAutoLayoutViewsToSuperview(titlebarViews.allValues, titlebarView);
+
+		[titlebarView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(8)-[searchField]-(8)-|" options:0 metrics:nil views:titlebarViews]];
+		[titlebarView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[dividerView]|" options:0 metrics:nil views:titlebarViews]];
+		[titlebarView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(8)-[scopeBar]-(>=8)-|" options:0 metrics:nil views:titlebarViews]];
+
+		[titlebarView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|-(4)-[searchField]-(8)-[dividerView(==1)]-(4)-[scopeBar]-(4)-|" options:0 metrics:nil views:titlebarViews]];
+		[self addTitlebarAccessoryView:titlebarView];
+
+		_progressIndicator = [[NSProgressIndicator alloc] initWithFrame:NSZeroRect];
+		_progressIndicator.style                = NSProgressIndicatorSpinningStyle;
+		_progressIndicator.controlSize          = NSControlSizeSmall;
+		_progressIndicator.displayedWhenStopped = NO;
+
+		NSDictionary* footerViews = @{
+			@"dividerView":        [self makeDividerView],
+			@"statusTextField":    self.statusTextField,
+			@"itemCountTextField": self.itemCountTextField,
+			@"progressIndicator":  _progressIndicator,
+		};
+
+		NSView* footerView = self.footerView;
+		OakAddAutoLayoutViewsToSuperview(footerViews.allValues, footerView);
+
+		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[dividerView]|"                                 options:0 metrics:nil views:footerViews]];
+		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(24)-[statusTextField]-[itemCountTextField]-(4)-[progressIndicator]-(4)-|" options:NSLayoutFormatAlignAllCenterY metrics:nil views:footerViews]];
+		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[dividerView(==1)]-(4)-[statusTextField]-(5)-|" options:0 metrics:nil views:footerViews]];
+
+		[self updateScrollViewInsets];
+
 		OakSetupKeyViewLoop(@[ self.searchField, scopeBar ]);
 
-		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(8)-[searchField(>=50)]-(8)-|"                      options:0 metrics:nil views:views]];
-		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[aboveScopeBarDark(==aboveScopeBarLight)]|"          options:0 metrics:nil views:views]];
-		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(8)-[scopeBar]-(>=8)-|" options:NSLayoutFormatAlignAllBaseline metrics:nil views:views]];
-		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[scrollView(==topDivider,==bottomDivider)]|"         options:0 metrics:nil views:views]];
-		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(24)-[statusTextField]-[itemCountTextField]-(4)-[progressIndicator]-(4)-|" options:NSLayoutFormatAlignAllCenterY metrics:nil views:views]];
-
-		[contentView addConstraint:[NSLayoutConstraint constraintWithItem:aboveScopeBarLight attribute:NSLayoutAttributeLeft relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeLeft multiplier:1.0 constant:0.0]];
-		[contentView addConstraint:[NSLayoutConstraint constraintWithItem:topDivider         attribute:NSLayoutAttributeLeft relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeLeft multiplier:1.0 constant:0.0]];
-		[contentView addConstraint:[NSLayoutConstraint constraintWithItem:bottomDivider      attribute:NSLayoutAttributeLeft relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeLeft multiplier:1.0 constant:0.0]];
-
-		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|-(2)-[searchField]-(8)-[aboveScopeBarDark][aboveScopeBarLight]-(3)-[scopeBar]-(4)-[topDivider][scrollView(>=50)][bottomDivider]-(4)-[statusTextField]-(5)-|" options:0 metrics:nil views:views]];
-
 		self.sourceIndex = [[NSUserDefaults standardUserDefaults] integerForKey:kUserDefaultsFileChooserSourceIndexKey];
-
 		[self updateWindowTitle];
-
 		[scopeBar bind:NSValueBinding toObject:self withKeyPath:@"sourceIndex" options:nil];
 	}
 	return self;
@@ -698,7 +695,7 @@ static NSDictionary* globs_for_path (std::string const& path)
 	self.path = [_path stringByDeletingLastPathComponent];
 }
 
-- (void)updateSelectTabMenu:(NSMenu*)aMenu
+- (void)updateShowTabMenu:(NSMenu*)aMenu
 {
 	if(self.window.isKeyWindow)
 	{

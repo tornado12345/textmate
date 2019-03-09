@@ -24,18 +24,18 @@
 {
 	if(self = [super initWithNibName:@"SoftwareUpdatePreferences" label:@"Software Update" image:[NSImage imageNamed:@"Software Update" inSameBundleAsClass:[self class]]])
 	{
-		[OakStringListTransformer createTransformerWithName:@"OakSoftwareUpdateChannelTransformer" andObjectsArray:@[ kSoftwareUpdateChannelRelease, kSoftwareUpdateChannelBeta ]];
+		[OakStringListTransformer createTransformerWithName:@"OakSoftwareUpdateChannelTransformer" andObjectsArray:@[ kSoftwareUpdateChannelRelease, kSoftwareUpdateChannelPrerelease ]];
 		[self bind:@"checking"    toObject:[SoftwareUpdate sharedInstance] withKeyPath:@"checking"    options:nil];
 		[self bind:@"lastPoll"    toObject:[SoftwareUpdate sharedInstance] withKeyPath:@"lastPoll"    options:nil];
 		[self bind:@"errorString" toObject:[SoftwareUpdate sharedInstance] withKeyPath:@"errorString" options:nil];
 
 		self.defaultsProperties = @{
-			@"disableSoftwareUpdates" : kUserDefaultsDisableSoftwareUpdatesKey,
-			@"disableCrashReports"    : kUserDefaultsDisableCrashReportingKey,
-			@"softwareUpdateChannel"  : kUserDefaultsSoftwareUpdateChannelKey,
-			@"askBeforeDownloading"   : kUserDefaultsAskBeforeUpdatingKey,
-			@"submitUsageInfo"        : kUserDefaultsSubmitUsageInfoKey,
-			@"contactInfo"            : kUserDefaultsCrashReportsContactInfoKey,
+			@"disableSoftwareUpdates": kUserDefaultsDisableSoftwareUpdatesKey,
+			@"disableCrashReports":    kUserDefaultsDisableCrashReportingKey,
+			@"softwareUpdateChannel":  kUserDefaultsSoftwareUpdateChannelKey,
+			@"askBeforeDownloading":   kUserDefaultsAskBeforeUpdatingKey,
+			@"submitUsageInfo":        kUserDefaultsSubmitUsageInfoKey,
+			@"contactInfo":            kUserDefaultsCrashReportsContactInfoKey,
 		};
 	}
 	return self;

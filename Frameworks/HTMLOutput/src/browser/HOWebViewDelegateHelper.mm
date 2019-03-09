@@ -28,7 +28,7 @@ static BOOL IsProtocolRelativeURL (NSURL* url)
 + (void)initialize
 {
 	[[NSUserDefaults standardUserDefaults] registerDefaults:@{
-		kUserDefaultsDefaultURLProtocolKey : @"https",
+		kUserDefaultsDefaultURLProtocolKey: @"https",
 	}];
 }
 
@@ -55,7 +55,7 @@ static BOOL IsProtocolRelativeURL (NSURL* url)
 - (void)webView:(WebView*)sender runJavaScriptAlertPanelWithMessage:(NSString*)message initiatedByFrame:(WebFrame*)frame
 {
 	NSAlert* alert = [NSAlert tmAlertWithMessageText:NSLocalizedString(@"Script Message", @"JavaScript alert title") informativeText:message buttons:NSLocalizedString(@"OK", @"JavaScript alert confirmation"), nil];
-	[alert beginSheetModalForWindow:[sender window] modalDelegate:nil didEndSelector:NULL contextInfo:NULL];
+	[alert beginSheetModalForWindow:[sender window] completionHandler:nil];
 }
 
 - (BOOL)webView:(WebView*)sender runJavaScriptConfirmPanelWithMessage:(NSString*)message initiatedByFrame:(WebFrame*)frame
@@ -83,7 +83,7 @@ static BOOL IsProtocolRelativeURL (NSURL* url)
 
 	HOBrowserView* view = [HOBrowserView new];
 	NSWindow* window = [[NSWindow alloc] initWithContentRect:(NSRect){origin, NSMakeSize(750, 800)}
-																  styleMask:(NSTitledWindowMask|NSClosableWindowMask|NSResizableWindowMask|NSMiniaturizableWindowMask)
+																  styleMask:(NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable)
 																	 backing:NSBackingStoreBuffered
 																		defer:NO];
 	[window bind:NSTitleBinding toObject:view.webView withKeyPath:@"mainFrameTitle" options:nil];
@@ -141,7 +141,7 @@ static BOOL IsProtocolRelativeURL (NSURL* url)
 	if([[request URL] isFileURL])
 	{
 		NSURL* redirectURL = [NSURL URLWithString:[NSString stringWithFormat:@"file://localhost%@?path=%@&error=1", [[[NSBundle bundleForClass:[self class]] pathForResource:@"error_not_found" ofType:@"html"] stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding], [[[request URL] path] stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]]];
-		char const* path = [[[request URL] path] fileSystemRepresentation];
+		char const* path = [[request URL] fileSystemRepresentation];
 
 		struct stat buf;
 		if(path && stat(path, &buf) == 0)

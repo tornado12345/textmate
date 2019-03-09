@@ -47,17 +47,17 @@
 
 	[encodingPopUpButton setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
 
-	OakSetAccessibilityLabel(encodingPopUpButton, @"encoding");
-	OakSetAccessibilityLabel(lineEndingsPopUpButton, @"line endings");
+	encodingPopUpButton.accessibilityLabel    = @"Encoding";
+	lineEndingsPopUpButton.accessibilityLabel = @"Line endings";
 
 	NSArray* titles = @[ @"LF", @"CR", @"CRLF" ];
 	for(NSUInteger i = 0; i < [titles count]; ++i)
 		[[lineEndingsPopUpButton.menu addItemWithTitle:titles[i] action:nil keyEquivalent:@""] setTag:i];
 
 	NSDictionary* views = @{
-		@"encodingLabel"    : OakCreateLabel(@"Encoding:"),
-		@"encodingPopUp"    : encodingPopUpButton,
-		@"lineEndingsPopUp" : lineEndingsPopUpButton,
+		@"encodingLabel":    OakCreateLabel(@"Encoding:"),
+		@"encodingPopUp":    encodingPopUpButton,
+		@"lineEndingsPopUp": lineEndingsPopUpButton,
 	};
 
 	NSView* containerView = [[NSView alloc] initWithFrame:NSZeroRect];

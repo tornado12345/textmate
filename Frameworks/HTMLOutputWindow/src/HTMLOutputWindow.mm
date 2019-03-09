@@ -22,7 +22,7 @@ OAK_DEBUG_VAR(HTMLOutputWindow);
 		NSRect rect = [[NSScreen mainScreen] visibleFrame];
 		rect = NSIntegralRect(NSInsetRect(rect, NSWidth(rect) / 3, NSHeight(rect) / 5));
 
-		self.window         = [[NSWindow alloc] initWithContentRect:rect styleMask:(NSTitledWindowMask|NSClosableWindowMask|NSResizableWindowMask|NSMiniaturizableWindowMask) backing:NSBackingStoreBuffered defer:NO];
+		self.window         = [[NSWindow alloc] initWithContentRect:rect styleMask:(NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable) backing:NSBackingStoreBuffered defer:NO];
 		self.htmlOutputView = [[OakHTMLOutputView alloc] init];
 
 		[self.window bind:NSTitleBinding toObject:self.htmlOutputView withKeyPath:@"mainFrameTitle" options:nil];
@@ -30,8 +30,6 @@ OAK_DEBUG_VAR(HTMLOutputWindow);
 		[self.window setContentView:self.htmlOutputView];
 		[self.window setDelegate:self];
 		[self.window setReleasedWhenClosed:NO];
-		[self.window setAutorecalculatesContentBorderThickness:NO forEdge:NSMinYEdge];
-		[self.window setContentBorderThickness:25 forEdge:NSMinYEdge];
 		[self.window setCollectionBehavior:NSWindowCollectionBehaviorMoveToActiveSpace|NSWindowCollectionBehaviorFullScreenAuxiliary];
 
 		// Register to application activation/deactivation notification so we can tweak our collection behavior

@@ -23,6 +23,7 @@ namespace plist
 	private:
 		struct field_t
 		{
+			virtual ~field_t() = default;
 			virtual bool handle (plist::any_t const& value, OBJ_TYPE* obj) const = 0;
 		};
 
@@ -64,7 +65,7 @@ namespace plist
 			T OBJ_TYPE::* _field;
 		};
 
-		_fields.emplace(field, field_ptr((field_t*)new variant_field_t(dstField)));
+		_fields.emplace(field, std::make_shared<variant_field_t>(dstField));
 		return *this;
 	}
 
@@ -86,7 +87,7 @@ namespace plist
 			bool(*_converter)(SRC_T const&, DST_T&);
 		};
 
-		_fields.emplace(field, field_ptr((field_t*)new variant_field_t(dstField, converter)));
+		_fields.emplace(field, std::make_shared<variant_field_t>(dstField, converter));
 		return *this;
 	}
 

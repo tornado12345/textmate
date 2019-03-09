@@ -22,13 +22,12 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 
 @interface FFResultsViewController () <NSOutlineViewDataSource, NSOutlineViewDelegate>
 {
-	NSView*        _topDivider;
 	NSScrollView*  _scrollView;
-	NSView*        _bottomDivider;
 	NSFont*        _searchResultsFont;
 
 	__weak id      _eventMonitor;
 	BOOL           _longPressedCommandModifier;
+	CGFloat        _pendingColumnWidth;
 
 	FFResultNode*  _lastSelectedResult;
 }
@@ -46,15 +45,16 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 @implementation OakSearchResultsCheckboxView
 - (id)initWithFrame:(NSRect)aFrame
 {
-	NSButton* button = OakCreateCheckBox(nil);
-	[[button cell] setControlSize:NSSmallControlSize];
-	[button sizeToFit];
-	[button setAutoresizingMask:NSViewWidthSizable|NSViewHeightSizable];
-
-	if((self = [super initWithFrame:button.frame]))
+	if((self = [super initWithFrame:aFrame]))
 	{
-		_button = button;
+		_button = OakCreateCheckBox(nil);
+		_button.controlSize = NSControlSizeSmall;
+
+		_button.translatesAutoresizingMaskIntoConstraints = NO;
 		[self addSubview:_button];
+
+		[self addConstraint:[NSLayoutConstraint constraintWithItem:_button attribute:NSLayoutAttributeCenterX relatedBy:NSLayoutRelationEqual toItem:self attribute:NSLayoutAttributeCenterX multiplier:1 constant:0]];
+		[self addConstraint:[NSLayoutConstraint constraintWithItem:_button attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual toItem:self attribute:NSLayoutAttributeCenterY multiplier:1 constant:0]];
 
 		[_button bind:NSEnabledBinding toObject:self withKeyPath:@"objectValue.readOnly" options:@{ NSValueTransformerNameBindingOption: NSNegateBooleanTransformerName }];
 		[_button bind:NSValueBinding toObject:self withKeyPath:@"objectValue.excluded" options:@{ NSValueTransformerNameBindingOption: NSNegateBooleanTransformerName }];
@@ -121,8 +121,16 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 		self.observeKeyPaths = @[ @"replaceString", @"showReplacementPreviews" ];
 
 		NSTextField* textField = OakCreateLabel(@"", font);
-		[textField setAutoresizingMask:NSViewWidthSizable|NSViewHeightSizable];
-		[self addSubview:textField];
+		[textField setContentHuggingPriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
+		[textField setContentCompressionResistancePriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
+
+		NSDictionary* views = @{
+			@"textField": textField,
+		};
+		OakAddAutoLayoutViewsToSuperview(views.allValues, self);
+		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[textField]" options:0 metrics:nil views:views]];
+		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[textField]|" options:0 metrics:nil views:views]];
+
 		[textField bind:NSValueBinding toObject:self withKeyPath:@"excerptString" options:nil];
 
 		self.textField = textField;
@@ -174,26 +182,32 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 
 		NSButton* countOfLeafs = [NSButton new];
 		[[countOfLeafs cell] setHighlightsBy:NSNoCellMask];
-		countOfLeafs.alignment  = NSCenterTextAlignment;
+		countOfLeafs.alignment  = NSTextAlignmentCenter;
 		countOfLeafs.bezelStyle = NSInlineBezelStyle;
 		countOfLeafs.font       = [NSFont labelFontOfSize:0];
 		countOfLeafs.identifier = @"countOfLeafs";
 
-		NSButton* remove = [NSButton new];
-		[[remove cell] setControlSize:NSSmallControlSize];
-		remove.bezelStyle = NSRoundRectBezelStyle;
-		remove.buttonType = NSMomentaryPushInButton;
-		remove.image      = [NSImage imageNamed:NSImageNameRemoveTemplate];
+		NSImage* removeTemplateImage = [NSImage imageWithSize:NSMakeSize(8, 8) flipped:NO drawingHandler:^BOOL(NSRect dstRect){
+			[[NSColor blackColor] set];
+			NSRectFill(NSInsetRect(dstRect, 0, floor(NSHeight(dstRect)/2)-1));
+			return YES;
+		}];
+		[removeTemplateImage setTemplate:YES];
 
-		NSDictionary* views = @{ @"icon" : imageView, @"text" : textField, @"count" : countOfLeafs, @"remove" : remove };
+		NSButton* remove = [NSButton new];
+		remove.controlSize = NSControlSizeSmall;
+		remove.bezelStyle  = NSRoundRectBezelStyle;
+		remove.buttonType  = NSMomentaryPushInButton;
+		remove.image       = removeTemplateImage;
+
+		NSDictionary* views = @{ @"icon": imageView, @"text": textField, @"count": countOfLeafs, @"remove": remove };
 		OakAddAutoLayoutViewsToSuperview([views allValues], self);
 
 		[textField setContentHuggingPriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
 		[countOfLeafs setContentCompressionResistancePriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
 
-		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(6)-[icon(==16)]-(3)-[text]-(>=8)-[remove(==16)]-(12)-|" options:NSLayoutFormatAlignAllCenterY metrics:nil views:views]];
-		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[text]-(4)-[count]"                                        options:NSLayoutFormatAlignAllBaseline metrics:nil views:views]];
-		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[count]-(>=4)-[remove]"                                    options:0 metrics:nil views:views]];
+		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(9)-[remove(==16)]-(6)-[icon(==16)]-(3)-[text]"          options:NSLayoutFormatAlignAllCenterY metrics:nil views:views]];
+		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[text]-(4)-[count]-(>=8)-|"                                options:NSLayoutFormatAlignAllBaseline metrics:nil views:views]];
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:[icon(==16,==remove)]-(3)-|"                               options:0 metrics:nil views:views]];
 
 		[imageView bind:NSValueBinding toObject:self withKeyPath:@"objectValue.document.icon" options:nil];
@@ -229,34 +243,34 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 			return;
 
 		NSRect rect = NSUnionRect(self.imageView.bounds, NSMakeRect(0, 0, 16, 16));
-		NSColor* color = [NSColor grayColor];
+		NSImage* image = [NSImage imageWithSize:rect.size flipped:NO drawingHandler:^BOOL(NSRect dstRect){
+			NSColor* color = [NSColor secondaryLabelColor];
 
-		NSImage* image = [[NSImage alloc] initWithSize:rect.size];
-		[image lockFocus];
+			CGFloat ptrn[] = { 2, 1 };
+			NSBezierPath* path = [NSBezierPath bezierPathWithRoundedRect:NSIntegralRect(NSInsetRect(dstRect, 1, 1)) xRadius:2 yRadius:2];
+			[path setLineDash:ptrn count:sizeofA(ptrn) phase:0];
+			[path setLineWidth:1];
 
-		CGFloat ptrn[] = { 2, 1 };
-		NSBezierPath* path = [NSBezierPath bezierPathWithRoundedRect:NSIntegralRect(NSInsetRect(rect, 1, 1)) xRadius:2 yRadius:2];
-		[path setLineDash:ptrn count:sizeofA(ptrn) phase:0];
-		[path setLineWidth:1];
+			[color set];
+			[path stroke];
 
-		[color set];
-		[path stroke];
+			NSMutableParagraphStyle* pStyle = [NSMutableParagraphStyle new];
+			[pStyle setAlignment:NSTextAlignmentCenter];
+			NSDictionary* attributes = @{
+				NSFontAttributeName:            [NSFont boldSystemFontOfSize:0],
+				NSForegroundColorAttributeName: color,
+				NSParagraphStyleAttributeName:  pStyle,
+			};
 
-		NSMutableParagraphStyle* pStyle = [NSMutableParagraphStyle new];
-		[pStyle setAlignment:NSCenterTextAlignment];
-		NSDictionary* attributes = @{
-			NSFontAttributeName            : [NSFont boldSystemFontOfSize:0],
-			NSForegroundColorAttributeName : color,
-			NSParagraphStyleAttributeName  : pStyle,
-		};
+			NSAttributedString* str = [[NSAttributedString alloc] initWithString:[NSString stringWithFormat:@"%lu", (index + 1) % 10] attributes:attributes];
+			NSSize size = [str size];
+			dstRect.origin.y = 0.5 * (NSHeight(dstRect) - size.height);
+			dstRect.size.height = size.height;
+			[str drawInRect:NSIntegralRect(dstRect)];
 
-		NSAttributedString* str = [[NSAttributedString alloc] initWithString:[NSString stringWithFormat:@"%lu", (index + 1) % 10] attributes:attributes];
-		NSSize size = [str size];
-		rect.origin.y = 0.5 * (NSHeight(rect) - size.height);
-		rect.size.height = size.height;
-		[str drawInRect:NSIntegralRect(rect)];
+			return YES;
+		}];
 
-		[image unlockFocus];
 		[self.imageView setImage:image];
 	}
 	else
@@ -295,17 +309,15 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 		[label sizeToFit];
 		CGFloat lineHeight = std::max(NSHeight(label.frame), ceil(_searchResultsFont.ascender) + ceil(fabs(_searchResultsFont.descender)) + ceil(_searchResultsFont.leading));
 
-		_topDivider    = OakCreateHorizontalLine([NSColor colorWithCalibratedWhite:0.500 alpha:1]);
-		_bottomDivider = OakCreateHorizontalLine([NSColor colorWithCalibratedWhite:0.500 alpha:1]);
-
 		_outlineView = [[NSOutlineView alloc] initWithFrame:NSZeroRect];
-		OakSetAccessibilityLabel(_outlineView, @"Results");
+		_outlineView.accessibilityLabel                 = @"Results";
 		_outlineView.focusRingType                      = NSFocusRingTypeNone;
 		_outlineView.allowsMultipleSelection            = YES;
 		_outlineView.autoresizesOutlineColumn           = NO;
 		_outlineView.usesAlternatingRowBackgroundColors = YES;
 		_outlineView.headerView                         = nil;
 		_outlineView.rowHeight                          = std::max(lineHeight, 14.0);
+		_outlineView.columnAutoresizingStyle            = NSTableViewNoColumnAutoresizing;
 
 		NSTableColumn* tableColumn = [[NSTableColumn alloc] initWithIdentifier:@"checkbox"];
 		tableColumn.width = 50;
@@ -318,22 +330,20 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 
 		_scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
 		_scrollView.hasVerticalScroller   = YES;
-		_scrollView.hasHorizontalScroller = NO;
+		_scrollView.hasHorizontalScroller = YES;
 		_scrollView.autohidesScrollers    = YES;
-		_scrollView.borderType            = NSNoBorder;
+		_scrollView.borderType            = NSLineBorder;
 		_scrollView.documentView          = _outlineView;
 
 		NSDictionary* views = @{
-			@"topDivider"    : _topDivider,
-			@"scrollView"    : _scrollView,
-			@"bottomDivider" : _bottomDivider,
+			@"scrollView": _scrollView,
 		};
 
 		NSView* containerView = [[NSView alloc] initWithFrame:NSZeroRect];
 		OakAddAutoLayoutViewsToSuperview([views allValues], containerView);
 
-		[containerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[topDivider][scrollView][bottomDivider]|" options:NSLayoutFormatAlignAllLeading|NSLayoutFormatAlignAllTrailing metrics:nil views:views]];
-		[containerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[scrollView]|" options:0 metrics:nil views:views]];
+		[containerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[scrollView]|" options:0 metrics:nil views:views]];
+		[containerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(-1)-[scrollView]-(-1)-|" options:0 metrics:nil views:views]];
 
 		self.view = containerView;
 
@@ -343,17 +353,17 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 		_outlineView.action       = @selector(didSingleClick:);
 		_outlineView.doubleAction = @selector(didDoubleClick:);
 
-		_eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSFlagsChangedMask handler:^NSEvent*(NSEvent* event){
-			NSUInteger modifierFlags = [_outlineView.window isKeyWindow] ? ([event modifierFlags] & (NSShiftKeyMask|NSControlKeyMask|NSAlternateKeyMask|NSCommandKeyMask)) : 0;
+		_eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged handler:^NSEvent*(NSEvent* event){
+			NSUInteger modifierFlags = [_outlineView.window isKeyWindow] ? ([event modifierFlags] & (NSEventModifierFlagShift|NSEventModifierFlagControl|NSEventModifierFlagOption|NSEventModifierFlagCommand)) : 0;
 			if(_longPressedCommandModifier)
 			{
-				self.showKeyEquivalent = modifierFlags == NSCommandKeyMask;
+				self.showKeyEquivalent = modifierFlags == NSEventModifierFlagCommand;
 				if(modifierFlags == 0)
 					_longPressedCommandModifier = NO;
 			}
 			else
 			{
-				if(modifierFlags == NSCommandKeyMask)
+				if(modifierFlags == NSEventModifierFlagCommand)
 						[self performSelector:@selector(delayedLongPressedCommandModifier:) withObject:self afterDelay:0.2];
 				else	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedLongPressedCommandModifier:) object:self];
 			}
@@ -375,6 +385,8 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 
 - (void)setResults:(FFResultNode*)someResults
 {
+	[_outlineView sizeLastColumnToFit];
+
 	_results = someResults;
 	[_outlineView reloadData];
 }
@@ -604,6 +616,18 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 	return [self outlineView:outlineView isGroupItem:item] ? 22 : item.lineSpan * [outlineView rowHeight];
 }
 
+- (void)commitPendingColumnWidth:(NSTableColumn*)tableColumn
+{
+	if(_pendingColumnWidth)
+	{
+		tableColumn.minWidth = MIN(_pendingColumnWidth, tableColumn.minWidth);
+		tableColumn.maxWidth = MAX(_pendingColumnWidth, tableColumn.maxWidth);
+		tableColumn.width    = _pendingColumnWidth;
+
+		_pendingColumnWidth = 0;
+	}
+}
+
 - (NSView*)outlineView:(NSOutlineView*)outlineView viewForTableColumn:(NSTableColumn*)tableColumn item:(FFResultNode*)item
 {
 	NSString* identifier = tableColumn.identifier ?: @"group";
@@ -629,7 +653,17 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 			res = cellView = [[OakSearchResultsMatchCellView alloc] initWithViewController:self font:_searchResultsFont];
 			cellView.identifier = identifier;
 		}
+
 		cellView.objectValue = item;
+		[cellView layoutSubtreeIfNeeded];
+		CGFloat width = NSMaxX(cellView.textField.frame) + 32;
+
+		if(tableColumn.width < width && _pendingColumnWidth < width)
+		{
+			if(_pendingColumnWidth == 0)
+				[self performSelector:@selector(commitPendingColumnWidth:) withObject:tableColumn afterDelay:0];
+			_pendingColumnWidth = width;
+		}
 	}
 	else
 	{

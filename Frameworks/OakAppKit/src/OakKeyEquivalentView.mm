@@ -31,6 +31,11 @@ static NSString* const kRecordingPlaceholderString = @"…";
 	return NSMakeSize(NSViewNoInstrinsicMetric, 22);
 }
 
+- (CGFloat)baselineOffsetFromBottom
+{
+	return 5;
+}
+
 - (void)setEventString:(NSString*)aString
 {
 	if(_eventString == aString || [_eventString isEqualToString:aString])
@@ -81,7 +86,7 @@ static NSString* const kRecordingPlaceholderString = @"…";
 			_clearButton.target = self;
 			_clearButton.action = @selector(clearKeyEquivalent:);
 
-			NSDictionary* views = @{ @"clear" : _clearButton };
+			NSDictionary* views = @{ @"clear": _clearButton };
 			OakAddAutoLayoutViewsToSuperview([views allValues], self);
 			[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(>=4)-[clear]-(4)-|" options:0 metrics:nil views:views]];
 			[self addConstraint:[NSLayoutConstraint constraintWithItem:_clearButton attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual toItem:self attribute:NSLayoutAttributeCenterY multiplier:1 constant:0]];
@@ -109,13 +114,13 @@ static NSString* const kRecordingPlaceholderString = @"…";
 		if(self.disableGlobalHotkeys)
 			_hotkeyToken = PushSymbolicHotKeyMode(kHIHotKeyModeAllDisabled);
 
-		_eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSFlagsChangedMask|NSKeyDownMask handler:^NSEvent*(NSEvent* event){
-			if([event type] == NSFlagsChanged)
+		_eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged|NSEventMaskKeyDown handler:^NSEvent*(NSEvent* event){
+			if([event type] == NSEventTypeFlagsChanged)
 			{
 				std::string const str = ns::glyphs_for_flags([event modifierFlags]);
 				self.displayString = str == "" ? kRecordingPlaceholderString : [NSString stringWithCxxString:str];
 			}
-			else if([event type] == NSKeyDown)
+			else if([event type] == NSEventTypeKeyDown)
 			{
 				self.eventString = [NSString stringWithCxxString:to_s(event)];
 				self.recording = NO;
@@ -196,13 +201,17 @@ static NSString* const kRecordingPlaceholderString = @"…";
 {
 	NSRect frame = [self bounds];
 
-	[[NSColor grayColor] set];
+	[[NSColor lightGrayColor] set];
 	NSFrameRect(frame);
-	NSEraseRect(NSIntersectionRect(aRect, NSInsetRect(frame, 1, 1)));
+
+	if(@available(macos 10.14, *))
+		[[NSColor controlColor] set];
+	else	[[NSColor whiteColor] set];
+	NSRectFill(NSIntersectionRect(aRect, NSInsetRect(frame, 1, 1)));
 
 	NSDictionary* stringAttributes = @{
-		NSForegroundColorAttributeName : self.recording ? [NSColor grayColor] : [NSColor blackColor],
-		NSFontAttributeName            : OakControlFont()
+		NSForegroundColorAttributeName: self.recording ? [NSColor secondaryLabelColor] : [NSColor labelColor],
+		NSFontAttributeName:            OakControlFont()
 	};
 
 	NSSize size = [self.displayString sizeWithAttributes:stringAttributes];

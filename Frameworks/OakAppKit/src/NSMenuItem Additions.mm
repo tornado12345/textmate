@@ -1,5 +1,4 @@
 #import "NSMenu Additions.h"
-#import "OakFileIconImage.h"
 #import <OakFoundation/OakFoundation.h>
 #import <OakFoundation/NSString Additions.h>
 #import <text/case.h>
@@ -75,7 +74,7 @@
 
 - (void)appendTableCellWithString:(NSString*)string table:(NSTextTable*)table textAlignment:(NSTextAlignment)textAlignment verticalAlignment:(NSTextBlockVerticalAlignment)verticalAlignment font:(NSFont*)font row:(NSInteger)row column:(NSInteger)column;
 {
-	CGSize stringSize = [string sizeWithAttributes:@{ NSFontAttributeName : font }];
+	CGSize stringSize = [string sizeWithAttributes:@{ NSFontAttributeName: font }];
 
 	NSTextTableBlock* block = [[NSTextTableBlock alloc] initWithTable:table startingRow:row rowSpan:1 startingColumn:column columnSpan:1];
 
@@ -87,6 +86,7 @@
 	NSMutableParagraphStyle* paragraphStyle = [NSMutableParagraphStyle new];
 	[paragraphStyle setTextBlocks:@[ block ]];
 	[paragraphStyle setAlignment:textAlignment];
+	[paragraphStyle setLineBreakMode:NSLineBreakByClipping];
 
 	string = [string stringByAppendingString:@"\n"];
 
@@ -116,7 +116,7 @@ static char const* kOakMenuItemTabTrigger    = "OakMenuItemTabTrigger";
 {
 	NSImage* icon = nil;
 	if([[NSFileManager defaultManager] fileExistsAtPath:path])
-		icon = [OakFileIconImage fileIconImageWithPath:path size:NSMakeSize(16, 16)];
+		icon = [[NSWorkspace sharedWorkspace] iconForFile:path];
 	else if(OakNotEmptyString([path pathExtension]))
 		icon = [[NSWorkspace sharedWorkspace] iconForFileType:[path pathExtension]];
 	else
@@ -136,8 +136,8 @@ static char const* kOakMenuItemTabTrigger    = "OakMenuItemTabTrigger";
 	[table setNumberOfColumns:2];
 
 	NSFont* font = self.menu.font ?: [NSFont menuFontOfSize:0];
-	[attributedTitle appendTableCellWithString:self.title table:table textAlignment:NSLeftTextAlignment verticalAlignment:NSTextBlockMiddleAlignment font:font row:0 column:0];
-	[attributedTitle appendTableCellWithString:anActivationString table:table textAlignment:NSRightTextAlignment verticalAlignment:aFont && aFont.pointSize >= 13 ? NSTextBlockBottomAlignment : NSTextBlockMiddleAlignment font:(aFont ?: font) row:0 column:1];
+	[attributedTitle appendTableCellWithString:self.title table:table textAlignment:NSTextAlignmentLeft verticalAlignment:NSTextBlockMiddleAlignment font:font row:0 column:0];
+	[attributedTitle appendTableCellWithString:anActivationString table:table textAlignment:NSTextAlignmentRight verticalAlignment:aFont && aFont.pointSize >= 13 ? NSTextBlockBottomAlignment : NSTextBlockMiddleAlignment font:(aFont ?: font) row:0 column:1];
 
 	NSString* plainTitle = self.title;
 	self.attributedTitle = attributedTitle;
@@ -175,11 +175,11 @@ static char const* kOakMenuItemTabTrigger    = "OakMenuItemTabTrigger";
 
 		switch(aKeyEquivalent[i++])
 		{
-			case '$': modifiers |= NSShiftKeyMask;      break;
-			case '^': modifiers |= NSControlKeyMask;    break;
-			case '~': modifiers |= NSAlternateKeyMask;  break;
-			case '@': modifiers |= NSCommandKeyMask;    break;
-			case '#': modifiers |= NSNumericPadKeyMask; break;
+			case '$': modifiers |= NSEventModifierFlagShift;      break;
+			case '^': modifiers |= NSEventModifierFlagControl;    break;
+			case '~': modifiers |= NSEventModifierFlagOption;     break;
+			case '@': modifiers |= NSEventModifierFlagCommand;    break;
+			case '#': modifiers |= NSEventModifierFlagNumericPad; break;
 		}
 	}
 
@@ -222,7 +222,7 @@ static char const* kOakMenuItemTabTrigger    = "OakMenuItemTabTrigger";
 		else
 		{
 			NSFont* font = self.menu.font ?: [NSFont menuFontOfSize:0];
-			self.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{ NSFontAttributeName : font }];
+			self.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{ NSFontAttributeName: font }];
 		}
 	}
 	self.title = plainTitle;

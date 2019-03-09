@@ -1,10 +1,10 @@
 #import "BundleItemChooser.h"
+#import <FileBrowser/FileItemImage.h>
 #import "OakAbbreviations.h"
 #import <OakAppKit/OakAppKit.h>
 #import <OakAppKit/OakUIConstructionFunctions.h>
 #import <OakAppKit/OakKeyEquivalentView.h>
 #import <OakAppKit/OakScopeBarView.h>
-#import <OakAppKit/OakFileIconImage.h>
 #import <OakAppKit/NSColor Additions.h>
 #import <OakAppKit/NSImage Additions.h>
 #import <OakFoundation/OakFoundation.h>
@@ -172,22 +172,22 @@ static std::string key_equivalent_for_menu_item (NSMenuItem* menuItem)
 
 	static struct { NSUInteger flag; std::string symbol; } const EventFlags[] =
 	{
-		{ NSNumericPadKeyMask, "#" },
-		{ NSControlKeyMask,    "^" },
-		{ NSAlternateKeyMask,  "~" },
-		{ NSShiftKeyMask,      "$" },
-		{ NSCommandKeyMask,    "@" },
+		{ NSEventModifierFlagNumericPad, "#" },
+		{ NSEventModifierFlagControl,    "^" },
+		{ NSEventModifierFlagOption,     "~" },
+		{ NSEventModifierFlagShift,      "$" },
+		{ NSEventModifierFlagCommand,    "@" },
 	};
 
 	std::string key  = to_s([menuItem keyEquivalent]);
 	NSUInteger flags = [menuItem keyEquivalentModifierMask];
 
-	if(flags & NSShiftKeyMask)
+	if(flags & NSEventModifierFlagShift)
 	{
 		std::string const upCased = text::uppercase(key);
 		if(key != upCased)
 		{
-			flags &= ~NSShiftKeyMask;
+			flags &= ~NSEventModifierFlagShift;
 			key = upCased;
 		}
 	}
@@ -281,7 +281,7 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 		[shortcutTextField setContentHuggingPriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
 		[shortcutTextField setContentCompressionResistancePriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
 
-		NSDictionary* views = @{ @"icon" : imageView, @"name" : textField, @"context" : contextTextField, @"shortcut" : shortcutTextField };
+		NSDictionary* views = @{ @"icon": imageView, @"name": textField, @"context": contextTextField, @"shortcut": shortcutTextField };
 		OakAddAutoLayoutViewsToSuperview([views allValues], self);
 
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(4)-[icon]-(4)-[name]-(4)-[shortcut]-(8)-|" options:0 metrics:nil views:views]];
@@ -331,7 +331,7 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 	{
 		if(path::is_child(to_s(path), oak::application_t::path()))
 				image = [NSImage imageNamed:NSImageNameApplicationIcon];
-		else	image = [OakFileIconImage fileIconImageWithPath:path size:NSMakeSize(32, 32)];
+		else	image = CreateIconImageForURL([NSURL fileURLWithPath:path], NO, NO, NO, NO, scm::status::unknown);
 	}
 	else
 	{
@@ -402,10 +402,9 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 {
 	NSArray<ActionItem*>* _unfilteredItems;
 }
+@property (nonatomic) NSView* titlebarView;
 @property (nonatomic) OakKeyEquivalentView* keyEquivalentView;
 @property (nonatomic) NSPopUpButton* actionsPopUpButton;
-@property (nonatomic) NSView* aboveScopeBarDark;
-@property (nonatomic) NSView* aboveScopeBarLight;
 @property (nonatomic) OakScopeBarView* scopeBar;
 @property (nonatomic) NSView* topDivider;
 @property (nonatomic) NSView* bottomDivider;
@@ -442,7 +441,6 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 		_searchSource     = kSearchSourceActionItems|kSearchSourceMenuItems|kSearchSourceKeyBindingItems;
 
 		self.window.title = @"Select Bundle Item";
-		[self.window setContentBorderThickness:31 forEdge:NSMinYEdge];
 
 		self.actionsPopUpButton = OakCreateActionPopUpButton(YES /* bordered */);
 		NSMenu* actionMenu = self.actionsPopUpButton.menu;
@@ -470,29 +468,54 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 		[actionMenu addItem:[NSMenuItem separatorItem]];
 		[actionMenu addItemWithTitle:@"Search All Scopes" action:@selector(toggleSearchAllScopes:) keyEquivalent:key < 9 ? [NSString stringWithFormat:@"%c", '0' + (++key % 10)] : @""];
 
-		self.aboveScopeBarDark  = OakCreateHorizontalLine([NSColor grayColor], [NSColor lightGrayColor]);
-		self.aboveScopeBarLight = OakCreateHorizontalLine([NSColor colorWithCalibratedWhite:0.797 alpha:1], [NSColor colorWithCalibratedWhite:0.912 alpha:1]);
-
 		self.scopeBar = [OakScopeBarView new];
 		self.scopeBar.labels = _sourceListLabels;
 
-		self.topDivider          = OakCreateHorizontalLine([NSColor darkGrayColor], [NSColor colorWithCalibratedWhite:0.551 alpha:1]),
-		self.bottomDivider       = OakCreateHorizontalLine([NSColor grayColor], [NSColor lightGrayColor]);
+		self.topDivider          = [self makeDividerView];
+		self.bottomDivider       = [self makeDividerView];
 
-		self.selectButton                  = OakCreateButton(@"Select");
-		self.selectButton.font             = [NSFont messageFontOfSize:[NSFont smallSystemFontSize]];
-		self.selectButton.cell.controlSize = NSSmallControlSize;
-		self.selectButton.target           = self;
-		self.selectButton.action           = @selector(accept:);
+		self.selectButton             = OakCreateButton(@"Select");
+		self.selectButton.font        = [NSFont messageFontOfSize:[NSFont systemFontSizeForControlSize:NSControlSizeSmall]];
+		self.selectButton.controlSize = NSControlSizeSmall;
+		self.selectButton.target      = self;
+		self.selectButton.action      = @selector(accept:);
 
-		self.editButton                  = OakCreateButton(@"Edit");
-		self.editButton.font             = [NSFont messageFontOfSize:[NSFont smallSystemFontSize]];
-		self.editButton.cell.controlSize = NSSmallControlSize;
-		self.editButton.target           = self;
-		self.editButton.action           = @selector(editItem:);
+		self.editButton             = OakCreateButton(@"Edit");
+		self.editButton.font        = [NSFont messageFontOfSize:[NSFont systemFontSizeForControlSize:NSControlSizeSmall]];
+		self.editButton.controlSize = NSControlSizeSmall;
+		self.editButton.target      = self;
+		self.editButton.action      = @selector(editItem:);
 
-		OakAddAutoLayoutViewsToSuperview([self.allViews allValues], self.window.contentView);
+		NSDictionary* titlebarViews = @{
+			@"searchField": self.keyEquivalentInput ? self.keyEquivalentView : self.searchField,
+			@"actions":     self.actionsPopUpButton,
+			@"dividerView": self.topDivider,
+			@"scopeBar":    self.scopeBar,
+		};
+
+		self.titlebarView = [[NSView alloc] initWithFrame:NSZeroRect];
+		OakAddAutoLayoutViewsToSuperview(titlebarViews.allValues, self.titlebarView);
 		[self setupLayoutConstraints];
+
+		[self addTitlebarAccessoryView:self.titlebarView];
+
+		NSDictionary* footerViews = @{
+			@"dividerView": self.bottomDivider,
+			@"status":      self.statusTextField,
+			@"edit":        self.editButton,
+			@"select":      self.selectButton,
+		};
+
+		NSView* footerView = self.footerView;
+		OakAddAutoLayoutViewsToSuperview(footerViews.allValues, footerView);
+
+		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[dividerView]|"                       options:0 metrics:nil views:footerViews]];
+		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(24)-[status]-[edit]-[select]-|"     options:NSLayoutFormatAlignAllCenterY metrics:nil views:footerViews]];
+		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[dividerView(==1)]-(4)-[select]-(5)-|" options:0 metrics:nil views:footerViews]];
+
+		[self updateScrollViewInsets];
+
+		OakSetupKeyViewLoop(@[ self.searchField, self.actionsPopUpButton, self.scopeBar, self.editButton, self.selectButton ]);
 
 		[self.scopeBar bind:NSValueBinding toObject:self withKeyPath:@"sourceIndex" options:nil];
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowDidChangeKeyStatus:) name:NSWindowDidBecomeKeyNotification object:self.window];
@@ -512,7 +535,7 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 {
 	auto updateDefaultButton = ^NSEvent*(NSEvent* event){
 		BOOL isKeyWindow = NSApp.keyWindow == self.window;
-		BOOL optionDown  = ([event modifierFlags] & NSDeviceIndependentModifierFlagsMask) == NSAlternateKeyMask;
+		BOOL optionDown  = ([event modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask) == NSEventModifierFlagOption;
 		self.window.defaultButtonCell = self.canEdit && (!self.canAccept || (optionDown && isKeyWindow)) ? self.editButton.cell : self.selectButton.cell;
 		return event;
 	};
@@ -520,7 +543,7 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 	updateDefaultButton([NSApp currentEvent]);
 	if(NSApp.keyWindow == self.window)
 	{
-		_eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSFlagsChangedMask handler:updateDefaultButton];
+		_eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged handler:updateDefaultButton];
 	}
 	else if(_eventMonitor)
 	{
@@ -550,44 +573,22 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 	}
 }
 
-- (NSDictionary*)allViews
-{
-	return @{
-		@"searchField"        : self.keyEquivalentInput ? self.keyEquivalentView : self.searchField,
-		@"actions"            : self.actionsPopUpButton,
-		@"aboveScopeBarDark"  : self.aboveScopeBarDark,
-		@"aboveScopeBarLight" : self.aboveScopeBarLight,
-		@"scopeBar"           : self.scopeBar,
-		@"topDivider"         : self.topDivider,
-		@"scrollView"         : self.scrollView,
-		@"bottomDivider"      : self.bottomDivider,
-		@"status"             : self.statusTextField,
-		@"edit"               : self.editButton,
-		@"select"             : self.selectButton,
-	};
-}
-
 - (void)setupLayoutConstraints
 {
-	NSDictionary* views = self.allViews;
+	NSDictionary* titlebarViews = @{
+		@"searchField": self.keyEquivalentInput ? self.keyEquivalentView : self.searchField,
+		@"actions":     self.actionsPopUpButton,
+		@"dividerView": self.topDivider,
+		@"scopeBar":    self.scopeBar,
+	};
 
 	NSMutableArray* constraints = [NSMutableArray array];
-	[constraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(8)-[searchField(>=50)]-[actions]-(8)-|"        options:NSLayoutFormatAlignAllCenterY metrics:nil views:views]];
-	[constraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[aboveScopeBarDark(==aboveScopeBarLight)]|"      options:0 metrics:nil views:views]];
-	[constraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(8)-[scopeBar]-(>=8)-|" options:NSLayoutFormatAlignAllBaseline metrics:nil views:views]];
-	[constraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[scrollView(==topDivider,==bottomDivider)]|"     options:0 metrics:nil views:views]];
-	[constraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(24)-[status]-[edit]-[select]-|"                options:NSLayoutFormatAlignAllCenterY metrics:nil views:views]];
-	[constraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|-(2)-[searchField]-(8)-[aboveScopeBarDark][aboveScopeBarLight]-(3)-[scopeBar]-(4)-[topDivider][scrollView(>=50)][bottomDivider]-(4)-[select]-(5)-|" options:0 metrics:nil views:views]];
-
-	NSView* contentView = self.window.contentView;
-	[constraints addObject:[NSLayoutConstraint constraintWithItem:_aboveScopeBarLight attribute:NSLayoutAttributeLeft relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeLeft multiplier:1.0 constant:0.0]];
-	[constraints addObject:[NSLayoutConstraint constraintWithItem:_topDivider         attribute:NSLayoutAttributeLeft relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeLeft multiplier:1.0 constant:0.0]];
-	[constraints addObject:[NSLayoutConstraint constraintWithItem:_bottomDivider      attribute:NSLayoutAttributeLeft relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeLeft multiplier:1.0 constant:0.0]];
-
-	[contentView addConstraints:constraints];
+	[constraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(8)-[searchField(>=50)]-[actions]-(8)-|"                       options:NSLayoutFormatAlignAllCenterY metrics:nil views:titlebarViews]];
+	[constraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[dividerView]|"                                                 options:0 metrics:nil views:titlebarViews]];
+	[constraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(8)-[scopeBar]-(>=8)-|"                                        options:0 metrics:nil views:titlebarViews]];
+	[constraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|-(4)-[searchField]-(8)-[dividerView(==1)]-(4)-[scopeBar]-(4)-|" options:0 metrics:nil views:titlebarViews]];
+	[self.titlebarView addConstraints:constraints];
 	self.layoutConstraints = constraints;
-
-	OakSetupKeyViewLoop(@[ (self.keyEquivalentInput ? self.keyEquivalentView : self.searchField), self.actionsPopUpButton, self.scopeBar, self.editButton, self.selectButton ]);
 }
 
 - (void)showWindow:(id)sender
@@ -634,11 +635,26 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 		[_keyEquivalentView setTranslatesAutoresizingMaskIntoConstraints:NO];
 		[_keyEquivalentView bind:NSValueBinding toObject:self withKeyPath:@"keyEquivalentString" options:nil];
 		[_keyEquivalentView addObserver:self forKeyPath:@"recording" options:NSKeyValueObservingOptionNew context:kRecordingBinding];
-
-		if(nil != &NSAccessibilitySharedFocusElementsAttribute) // MAC_OS_X_VERSION_10_10
-			[_keyEquivalentView accessibilitySetOverrideValue:@[ self.tableView ] forAttribute:NSAccessibilitySharedFocusElementsAttribute];
+		_keyEquivalentView.accessibilitySharedFocusElements = @[ self.tableView ];
 	}
 	return _keyEquivalentView;
+}
+
+- (void)replaceView:(NSView*)oldView withView:(NSView*)newView
+{
+	NSView* next = oldView.nextKeyView;
+	NSView* prev = oldView.previousKeyView;
+
+	NSView* contentView = oldView.superview;
+	[oldView removeFromSuperview];
+
+	[contentView addSubview:newView];
+
+	prev.nextKeyView = newView;
+	newView.nextKeyView = next;
+
+	newView.window.initialFirstResponder = newView;
+	[newView.window makeFirstResponder:newView];
 }
 
 - (void)setKeyEquivalentInput:(BOOL)flag
@@ -648,23 +664,15 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 
 	_keyEquivalentInput = flag;
 
-	NSView* contentView = self.window.contentView;
+	NSView* contentView = self.titlebarView;
 	[contentView removeConstraints:self.layoutConstraints];
 	self.layoutConstraints = nil;
 
 	if(flag)
-	{
-		[self.searchField removeFromSuperview];
-		[contentView addSubview:self.keyEquivalentView];
-	}
-	else
-	{
-		[self.keyEquivalentView removeFromSuperview];
-		[contentView addSubview:self.searchField];
-	}
+			[self replaceView:self.searchField withView:self.keyEquivalentView];
+	else	[self replaceView:self.keyEquivalentView withView:self.searchField];
 
 	[self setupLayoutConstraints];
-	[self.window makeFirstResponder:self.keyEquivalentInput ? self.keyEquivalentView : self.searchField];
 
 	self.keyEquivalentView.eventString = nil;
 	self.keyEquivalentView.recording   = self.keyEquivalentInput;

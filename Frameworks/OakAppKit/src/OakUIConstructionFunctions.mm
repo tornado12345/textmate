@@ -1,9 +1,10 @@
 #import "OakUIConstructionFunctions.h"
+#import "NSColor Additions.h"
 #import "NSImage Additions.h"
 
 NSFont* OakStatusBarFont ()
 {
-	return [NSFont messageFontOfSize:11];
+	return [NSFont messageFontOfSize:[NSUserDefaults.standardUserDefaults integerForKey:@"statusBarFontSize"] ?: 12];
 }
 
 NSFont* OakControlFont ()
@@ -13,6 +14,17 @@ NSFont* OakControlFont ()
 
 NSTextField* OakCreateLabel (NSString* label, NSFont* font, NSTextAlignment alignment, NSLineBreakMode lineBreakMode)
 {
+	// This was introduced in 10.12 but does not appear to use controlTextColor until 10.14, which is required for proper highlight when used in a table view
+	if(@available(macos 10.14, *))
+	{
+		NSTextField* res = [NSTextField labelWithString:label];
+		[[res cell] setLineBreakMode:lineBreakMode];
+		res.alignment = alignment;
+		if(font)
+			res.font = font;
+		return res;
+	}
+
 	NSTextField* res = [[NSTextField alloc] initWithFrame:NSZeroRect];
 	[[res cell] setWraps:NO];
 	[[res cell] setLineBreakMode:lineBreakMode];
@@ -29,6 +41,14 @@ NSTextField* OakCreateLabel (NSString* label, NSFont* font, NSTextAlignment alig
 
 NSButton* OakCreateCheckBox (NSString* label)
 {
+	if(@available(macos 10.14, *))
+	{
+		NSButton* res = [NSButton checkboxWithTitle:(label ?: @"") target:nil action:nil];
+		// When we have a row that only contains checkboxes (e.g. Find options), nothing restrains the height of that row
+		[res setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationVertical];
+		return res;
+	}
+
 	NSButton* res = [[NSButton alloc] initWithFrame:NSZeroRect];
 	[res setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationVertical];
 	res.buttonType = NSSwitchButton;
@@ -39,9 +59,15 @@ NSButton* OakCreateCheckBox (NSString* label)
 
 NSButton* OakCreateButton (NSString* label, NSBezelStyle bezel)
 {
+	if(@available(macos 10.12, *))
+	{
+		NSButton* res = [NSButton buttonWithTitle:label target:nil action:nil];
+		if(bezel != NSRoundedBezelStyle)
+			res.bezelStyle = bezel;
+		return res;
+	}
+
 	NSButton* res = [[NSButton alloc] initWithFrame:NSZeroRect];
-	[res setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationHorizontal];
-	[res setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationVertical];
 	res.bezelStyle = bezel;
 	res.buttonType = NSMomentaryPushInButton;
 	res.font       = OakControlFont();
@@ -49,12 +75,13 @@ NSButton* OakCreateButton (NSString* label, NSBezelStyle bezel)
 	return res;
 }
 
-NSPopUpButton* OakCreatePopUpButton (BOOL pullsDown, NSString* initialItemTitle, NSObject* accessibilityLabel)
+NSPopUpButton* OakCreatePopUpButton (BOOL pullsDown, NSString* initialItemTitle, NSView* labelView)
 {
 	NSPopUpButton* res = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:pullsDown];
 	if(initialItemTitle)
 		[[res cell] setMenuItem:[[NSMenuItem alloc] initWithTitle:initialItemTitle action:NULL keyEquivalent:@""]];
-	OakSetAccessibilityLabel(res, accessibilityLabel);
+	if(labelView)
+		res.accessibilityTitleUIElement = labelView;
 	return res;
 }
 
@@ -62,8 +89,7 @@ NSPopUpButton* OakCreateActionPopUpButton (BOOL bordered)
 {
 	NSPopUpButton* res = [NSPopUpButton new];
 	res.pullsDown = YES;
-	if(!(res.bordered = bordered))
-		[[res cell] setBackgroundStyle:NSBackgroundStyleRaised];
+	res.bordered = bordered;
 
 	NSMenuItem* item = [NSMenuItem new];
 	item.title = @"";
@@ -72,26 +98,16 @@ NSPopUpButton* OakCreateActionPopUpButton (BOOL bordered)
 
 	[[res cell] setUsesItemFromMenu:NO];
 	[[res cell] setMenuItem:item];
-	OakSetAccessibilityLabel(res, @"Actions");
+	res.accessibilityLabel = @"Actions";
 
 	return res;
 }
 
-NSPopUpButton* OakCreateStatusBarPopUpButton (NSString* initialItemTitle, NSObject* accessibilityLabel)
-{
-	NSPopUpButton* res = OakCreatePopUpButton(NO, initialItemTitle);
-	[[res cell] setBackgroundStyle:NSBackgroundStyleRaised];
-	res.font     = OakStatusBarFont();
-	res.bordered = NO;
-	OakSetAccessibilityLabel(res, accessibilityLabel);
-	return res;
-}
-
-NSComboBox* OakCreateComboBox (NSObject* accessibilityLabel)
+NSComboBox* OakCreateComboBox (NSView* labelView)
 {
 	NSComboBox* res = [[NSComboBox alloc] initWithFrame:NSZeroRect];
 	res.font = OakControlFont();
-	OakSetAccessibilityLabel(res, accessibilityLabel);
+	res.accessibilityTitleUIElement = labelView;
 	return res;
 }
 
@@ -102,7 +118,7 @@ OakRolloverButton* OakCreateCloseButton (NSString* accessibilityLabel)
 	closeButton.pressedImage  = [NSImage imageNamed:@"ClosePressedTemplate"  inSameBundleAsClass:[OakRolloverButton class]];
 	closeButton.rolloverImage = [NSImage imageNamed:@"CloseRolloverTemplate" inSameBundleAsClass:[OakRolloverButton class]];
 
-	OakSetAccessibilityLabel(closeButton, accessibilityLabel);
+	closeButton.accessibilityLabel = accessibilityLabel;
 	return closeButton;
 }
 
@@ -112,20 +128,19 @@ OakRolloverButton* OakCreateCloseButton (NSString* accessibilityLabel)
 
 @implementation OakBackgroundFillView
 {
+	NSView* _visualEffectBackgroundView;
 	id _activeBackgroundValue;
 	id _inactiveBackgroundValue;
 }
 
-- (void)setupHeaderBackground
+- (instancetype)initWithFrame:(NSRect)aRect
 {
-	self.activeBackgroundGradient   = [[NSGradient alloc] initWithStartingColor:[NSColor colorWithCalibratedWhite:0.915 alpha:1] endingColor:[NSColor colorWithCalibratedWhite:0.760 alpha:1]];
-	self.inactiveBackgroundGradient = [[NSGradient alloc] initWithStartingColor:[NSColor colorWithCalibratedWhite:0.915 alpha:1] endingColor:[NSColor colorWithCalibratedWhite:0.915 alpha:1]];
-}
-
-- (void)setupStatusBarBackground
-{
-	self.activeBackgroundGradient   = [[NSGradient alloc] initWithColorsAndLocations:[NSColor colorWithCalibratedWhite:1 alpha:0.68], 0.0, [NSColor colorWithCalibratedWhite:1 alpha:0.5], 0.0416, [NSColor colorWithCalibratedWhite:1 alpha:0], 1.0, nil];
-	self.inactiveBackgroundGradient = [[NSGradient alloc] initWithColorsAndLocations:[NSColor colorWithCalibratedWhite:1 alpha:0.68], 0.0, [NSColor colorWithCalibratedWhite:1 alpha:0.5], 0.0416, [NSColor colorWithCalibratedWhite:1 alpha:0], 1.0, nil];
+	if(self = [super initWithFrame:aRect])
+	{
+		_style = OakBackgroundFillViewStyleNone;
+		[self setWantsLayer:YES]; // required by NSVisualEffectBlendingModeWithinWindow
+	}
+	return self;
 }
 
 - (void)viewWillMoveToWindow:(NSWindow*)newWindow
@@ -146,12 +161,12 @@ OakRolloverButton* OakCreateCloseButton (NSString* accessibilityLabel)
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowDidChangeMainOrKey:) name:NSWindowDidResignKeyNotification object:newWindow];
 	}
 
-	self.active = ([newWindow styleMask] & NSFullScreenWindowMask) || [newWindow isMainWindow] || [newWindow isKeyWindow];
+	self.active = ([newWindow styleMask] & NSWindowStyleMaskFullScreen) || [newWindow isMainWindow] || [newWindow isKeyWindow];
 }
 
 - (void)windowDidChangeMainOrKey:(NSNotification*)aNotification
 {
-	self.active = ([self.window styleMask] & NSFullScreenWindowMask) || [self.window isMainWindow] || [self.window isKeyWindow];
+	self.active = ([self.window styleMask] & NSWindowStyleMaskFullScreen) || [self.window isMainWindow] || [self.window isKeyWindow];
 }
 
 - (void)setActive:(BOOL)flag
@@ -201,8 +216,70 @@ OakRolloverButton* OakCreateCloseButton (NSString* accessibilityLabel)
 	else	return NSMakeSize(NSViewNoInstrinsicMetric, NSViewNoInstrinsicMetric);
 }
 
+- (void)setStyle:(OakBackgroundFillViewStyle)aStyle
+{
+	if(_style == aStyle)
+		return;
+
+	_style = aStyle;
+	[self updateBackgroundStyle];
+	self.needsDisplay = YES;
+}
+
+- (void)updateBackgroundStyle
+{
+	if(_visualEffectBackgroundView)
+	{
+		[_visualEffectBackgroundView removeFromSuperview];
+		_visualEffectBackgroundView = nil;
+	}
+
+	if(self.style == OakBackgroundFillViewStyleHeader)
+	{
+		if(@available(macos 10.14, *))
+		{
+			NSVisualEffectView* effectView = [[NSVisualEffectView alloc] initWithFrame:[self bounds]];
+			effectView.material     = NSVisualEffectMaterialHeaderView; // MAC_OS_X_VERSION_10_14
+			effectView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+			_visualEffectBackgroundView = effectView;
+			[_visualEffectBackgroundView setAutoresizingMask:NSViewWidthSizable|NSViewHeightSizable];
+			[self addSubview:_visualEffectBackgroundView positioned:NSWindowBelow relativeTo:nil];
+		}
+		else
+		{
+			self.activeBackgroundGradient   = [[NSGradient alloc] initWithStartingColor:[NSColor colorWithCalibratedWhite:0.915 alpha:1] endingColor:[NSColor colorWithCalibratedWhite:0.760 alpha:1]];
+			self.inactiveBackgroundGradient = [[NSGradient alloc] initWithStartingColor:[NSColor colorWithCalibratedWhite:0.915 alpha:1] endingColor:[NSColor colorWithCalibratedWhite:0.915 alpha:1]];
+		}
+	}
+
+	if(self.style == OakBackgroundFillViewStyleDivider)
+	{
+		if(@available(macos 10.14, *))
+		{
+			self.activeBackgroundColor   = [NSColor separatorColor];
+			self.inactiveBackgroundColor = nil;
+		}
+		else
+		{
+			self.activeBackgroundColor   = [NSColor colorWithCalibratedWhite:0.500 alpha:1];
+			self.inactiveBackgroundColor = [NSColor colorWithCalibratedWhite:0.750 alpha:1];
+		}
+	}
+
+	if(self.style == OakBackgroundFillViewStyleDarkDivider)
+	{
+		self.activeBackgroundColor = [NSColor tmDarkDividerColor];
+	}
+}
+
 - (void)drawRect:(NSRect)aRect
 {
+	if(_visualEffectBackgroundView != nil)
+	{
+		[super drawRect:aRect];
+		return;
+	}
+
 	id value = _active || !_inactiveBackgroundValue ? _activeBackgroundValue : _inactiveBackgroundValue;
 	if([value isKindOfClass:[NSGradient class]])
 	{
@@ -216,7 +293,7 @@ OakRolloverButton* OakCreateCloseButton (NSString* accessibilityLabel)
 		CGContextRef context = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
 		CGAffineTransform affineTransform = CGContextGetCTM(context);
 		CGContextSetPatternPhase(context, CGSizeMake(affineTransform.tx, affineTransform.ty));
-		NSRectFillUsingOperation(aRect, NSCompositeSourceOver);
+		NSRectFillUsingOperation(aRect, NSCompositingOperationSourceOver);
 	}
 	else if([value isKindOfClass:[NSColor class]])
 	{
@@ -227,21 +304,19 @@ OakRolloverButton* OakCreateCloseButton (NSString* accessibilityLabel)
 }
 @end
 
-OakBackgroundFillView* OakCreateVerticalLine (NSColor* primaryColor, NSColor* secondaryColor)
+OakBackgroundFillView* OakCreateVerticalLine (OakBackgroundFillViewStyle style)
 {
 	OakBackgroundFillView* view = [[OakBackgroundFillView alloc] initWithFrame:NSZeroRect];
-	view.activeBackgroundColor   = primaryColor;
-	view.inactiveBackgroundColor = secondaryColor;
+	view.style = style;
 	[view addConstraint:[NSLayoutConstraint constraintWithItem:view attribute:NSLayoutAttributeWidth relatedBy:NSLayoutRelationEqual toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1 constant:1]];
 	view.translatesAutoresizingMaskIntoConstraints = NO;
 	return view;
 }
 
-OakBackgroundFillView* OakCreateHorizontalLine (NSColor* primaryColor, NSColor* secondaryColor)
+OakBackgroundFillView* OakCreateHorizontalLine (OakBackgroundFillViewStyle style)
 {
 	OakBackgroundFillView* view = [[OakBackgroundFillView alloc] initWithFrame:NSZeroRect];
-	view.activeBackgroundColor   = primaryColor;
-	view.inactiveBackgroundColor = secondaryColor;
+	view.style = style;
 	[view addConstraint:[NSLayoutConstraint constraintWithItem:view attribute:NSLayoutAttributeHeight relatedBy:NSLayoutRelationEqual toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1 constant:1]];
 	view.translatesAutoresizingMaskIntoConstraints = NO;
 	return view;
@@ -249,19 +324,21 @@ OakBackgroundFillView* OakCreateHorizontalLine (NSColor* primaryColor, NSColor* 
 
 NSView* OakCreateDividerImageView ()
 {
-	OakBackgroundFillView* divider = [[OakBackgroundFillView alloc] initWithFrame:NSZeroRect];
-	divider.activeBackgroundImage = [NSImage imageNamed:@"Divider" inSameBundleAsClass:[OakBackgroundFillView class]];
-	divider.translatesAutoresizingMaskIntoConstraints = NO;
-	[divider setContentHuggingPriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
+	NSBox* box = [[NSBox alloc] initWithFrame:NSZeroRect];
+	box.boxType = NSBoxSeparator;
 
-	NSView* res = [[NSView alloc] initWithFrame:NSZeroRect];
-	[res addSubview:divider];
+	NSDictionary* views = @{
+		@"box": box,
+	};
 
-	[res addConstraint:[NSLayoutConstraint constraintWithItem:divider attribute:NSLayoutAttributeCenterX relatedBy:NSLayoutRelationEqual toItem:res attribute:NSLayoutAttributeCenterX multiplier:1 constant:0]];
-	[res addConstraint:[NSLayoutConstraint constraintWithItem:divider attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual toItem:res attribute:NSLayoutAttributeCenterY multiplier:1 constant:0]];
-	[res addConstraint:[NSLayoutConstraint constraintWithItem:res attribute:NSLayoutAttributeWidth relatedBy:NSLayoutRelationEqual toItem:divider attribute:NSLayoutAttributeWidth multiplier:1 constant:0]];
+	NSView* contentView = [[NSView alloc] initWithFrame:NSZeroRect];
+	OakAddAutoLayoutViewsToSuperview(views.allValues, contentView);
 
-	return res;
+	[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[box(==1)]|" options:0 metrics:nil views:views]];
+	[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:[box(==16)]" options:0 metrics:nil views:views]];
+	[contentView addConstraint:[NSLayoutConstraint constraintWithItem:box attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual toItem:contentView attribute:NSLayoutAttributeCenterY multiplier:1 constant:0]];
+
+	return contentView;
 }
 
 void OakSetupKeyViewLoop (NSArray* superviews, BOOL setFirstResponder)
@@ -308,20 +385,4 @@ void OakAddAutoLayoutViewsToSuperview (NSArray* views, NSView* superview)
 		[view setTranslatesAutoresizingMaskIntoConstraints:NO];
 		[superview addSubview:view];
 	}
-}
-
-BOOL OakSetAccessibilityLabel (NSObject* element, NSObject* label)
-{
-	if(!(element = NSAccessibilityUnignoredDescendant(element)))
-		return NO;
-
-	NSString* attribute = NSAccessibilityDescriptionAttribute;
-	if(![label isKindOfClass:NSString.class])
-	{
-		attribute = NSAccessibilityTitleUIElementAttribute;
-		if(!(label = NSAccessibilityUnignoredDescendant(label)))
-			return NO;
-	}
-
-	return [element accessibilitySetOverrideValue:label forAttribute:attribute];
 }

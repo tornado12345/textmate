@@ -2,10 +2,11 @@
 
 NSMenuItem* MBCreateMenuItem (MBMenuItem const& item)
 {
-	if(!item.title || item.separator)
-		return [NSMenuItem separatorItem];
+	NSMenuItem* menuItem;
+	if(item.title && !item.separator)
+			menuItem = [[NSMenuItem alloc] initWithTitle:item.title action:item.action keyEquivalent:item.keyEquivalent];
+	else	menuItem = [NSMenuItem separatorItem];
 
-	NSMenuItem* menuItem = [[NSMenuItem alloc] initWithTitle:item.title action:item.action keyEquivalent:item.keyEquivalent];
 	menuItem.keyEquivalentModifierMask = item.modifierFlags;
 	menuItem.tag                       = item.tag;
 	menuItem.target                    = item.target;
@@ -13,14 +14,21 @@ NSMenuItem* MBCreateMenuItem (MBMenuItem const& item)
 	menuItem.enabled                   = item.enabled;
 	menuItem.hidden                    = item.hidden;
 	menuItem.indentationLevel          = item.indent;
+	menuItem.state                     = item.state;
 	menuItem.representedObject         = item.representedObject;
+
+	if(@available(macos 10.13, *))
+	{
+		if(item.hidden && (![item.keyEquivalent isEqualToString:@""] || item.key))
+			menuItem.allowsKeyEquivalentWhenHidden = YES;
+	}
 
 	if(item.key)
 		menuItem.keyEquivalent = [NSString stringWithFormat:@"%C", item.key];
 
 	if(item.submenu.size() > 0 || item.systemMenu != MBMenuTypeRegular || item.delegate || item.submenuRef)
 	{
-		NSMenu* submenu = MBCreateMenu(item.submenu, item.title);
+		NSMenu* submenu = MBCreateMenu(item.submenu, [[NSMenu alloc] initWithTitle:item.title]);
 		submenu.delegate = item.delegate;
 		menuItem.submenu = submenu;
 
@@ -47,9 +55,9 @@ NSMenuItem* MBCreateMenuItem (MBMenuItem const& item)
 	return menuItem;
 }
 
-PUBLIC NSMenu* MBCreateMenu (MBMenu const& items, NSString* title, NSMenu* existingMenu)
+PUBLIC NSMenu* MBCreateMenu (MBMenu const& items, NSMenu* existingMenu)
 {
-	NSMenu* menu = existingMenu ?: [[NSMenu alloc] initWithTitle:title];
+	NSMenu* menu = existingMenu ?: [[NSMenu alloc] initWithTitle:@"AMainMenu"];
 	for(auto const& item : items)
 		[menu addItem:MBCreateMenuItem(item)];
 	return menu;

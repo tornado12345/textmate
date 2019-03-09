@@ -146,20 +146,20 @@ static void* kOakCommitWindowIncludeItemBinding = &kOakCommitWindowIncludeItemBi
 
 		[CWStatusStringTransformer register];
 
-		self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 600, 350) styleMask:NSTitledWindowMask|NSResizableWindowMask backing:NSBackingStoreBuffered defer:NO];
+		self.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 600, 350) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
 		self.window.delegate          = self;
 		self.window.frameAutosaveName = @"Commit Window";
 
-		_commitButton = OakCreateButton([self commitButtonTitle], NSRoundedBezelStyle);
+		_commitButton = OakCreateButton([self commitButtonTitle]);
 		_commitButton.action                    = @selector(performCommit:);
 		_commitButton.keyEquivalent             = @"\r";
-		_commitButton.keyEquivalentModifierMask = NSCommandKeyMask;
+		_commitButton.keyEquivalentModifierMask = NSEventModifierFlagCommand;
 		_commitButton.target                    = self;
 
-		_cancelButton = OakCreateButton(@"Cancel", NSRoundedBezelStyle);
+		_cancelButton = OakCreateButton(@"Cancel");
 		_cancelButton.action                    = @selector(cancel:);
 		_cancelButton.keyEquivalent             = @".";
-		_cancelButton.keyEquivalentModifierMask = NSCommandKeyMask;
+		_cancelButton.keyEquivalentModifierMask = NSEventModifierFlagCommand;
 		_cancelButton.target                    = self;
 
 		_showTableButton = [[NSButton alloc] initWithFrame:NSZeroRect];
@@ -175,8 +175,8 @@ static void* kOakCommitWindowIncludeItemBinding = &kOakCommitWindowIncludeItemBi
 		_previousCommitMessagesPopUpButton.bezelStyle = NSTexturedRoundedBezelStyle;
 		[self setupPreviousCommitMessagesMenu];
 
-		_topDocumentViewDivider    = OakCreateHorizontalLine([NSColor grayColor]);
-		_bottomDocumentViewDivider = OakCreateHorizontalLine([NSColor grayColor]);
+		_topDocumentViewDivider    = OakCreateHorizontalLine(OakBackgroundFillViewStyleDivider);
+		_bottomDocumentViewDivider = OakCreateHorizontalLine(OakBackgroundFillViewStyleDivider);
 
 		NSView* contentView = self.window.contentView;
 		OakAddAutoLayoutViewsToSuperview([self.allViews allValues], contentView);
@@ -207,19 +207,19 @@ static void* kOakCommitWindowIncludeItemBinding = &kOakCommitWindowIncludeItemBi
 		if(self.showContinueSuffix)
 		{
 			__weak auto wealf = self;
-			_eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSFlagsChangedMask handler:^NSEvent*(NSEvent* event){
+			_eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged handler:^NSEvent*(NSEvent* event){
 				if(![wealf.window isKeyWindow])
 					return event;
 
-				if([event modifierFlags] & NSAlternateKeyMask)
+				if([event modifierFlags] & NSEventModifierFlagOption)
 				{
-					wealf.commitButton.keyEquivalentModifierMask |= NSAlternateKeyMask;
+					wealf.commitButton.keyEquivalentModifierMask |= NSEventModifierFlagOption;
 					wealf.commitButton.action = @selector(performCommit:);
 					wealf.showContinueSuffix = NO;
 				}
 				else
 				{
-					wealf.commitButton.keyEquivalentModifierMask &= ~NSAlternateKeyMask;
+					wealf.commitButton.keyEquivalentModifierMask &= ~NSEventModifierFlagOption;
 					wealf.commitButton.action = @selector(performCommitAndContinue:);
 					wealf.showContinueSuffix = YES;
 				}
@@ -248,17 +248,17 @@ static void* kOakCommitWindowIncludeItemBinding = &kOakCommitWindowIncludeItemBi
 - (NSDictionary*)allViews
 {
 	NSDictionary* views = @{
-		@"previousMessages"          : self.previousCommitMessagesPopUpButton,
-		@"topDocumentViewDivider"    : self.topDocumentViewDivider,
-		@"documentView"              : self.documentView,
-		@"bottomDocumentViewDivider" : self.bottomDocumentViewDivider,
-		@"topScrollViewDivider"      : self.topScrollViewDivider ?: [NSNull null],
-		@"scrollView"                : self.scrollView ?: [NSNull null],
-		@"bottomScrollViewDivider"   : self.bottomScrollViewDivider ?: [NSNull null],
-		@"showTableButton"           : self.showTableButton,
-		@"action"                    : self.actionPopUpButton ?: [NSNull null],
-		@"cancel"                    : self.cancelButton,
-		@"commit"                    : self.commitButton,
+		@"previousMessages":          self.previousCommitMessagesPopUpButton,
+		@"topDocumentViewDivider":    self.topDocumentViewDivider,
+		@"documentView":              self.documentView,
+		@"bottomDocumentViewDivider": self.bottomDocumentViewDivider,
+		@"topScrollViewDivider":      self.topScrollViewDivider ?: [NSNull null],
+		@"scrollView":                self.scrollView ?: [NSNull null],
+		@"bottomScrollViewDivider":   self.bottomScrollViewDivider ?: [NSNull null],
+		@"showTableButton":           self.showTableButton,
+		@"action":                    self.actionPopUpButton ?: [NSNull null],
+		@"cancel":                    self.cancelButton,
+		@"commit":                    self.commitButton,
 	};
 
 	return views;
@@ -355,8 +355,8 @@ static void* kOakCommitWindowIncludeItemBinding = &kOakCommitWindowIncludeItemBi
 	_scrollView.borderType            = NSNoBorder;
 	_scrollView.documentView          = _tableView;
 
-	_topScrollViewDivider    = OakCreateHorizontalLine([NSColor grayColor]);
-	_bottomScrollViewDivider = OakCreateHorizontalLine([NSColor grayColor]);
+	_topScrollViewDivider    = OakCreateHorizontalLine(OakBackgroundFillViewStyleDivider);
+	_bottomScrollViewDivider = OakCreateHorizontalLine(OakBackgroundFillViewStyleDivider);
 
 	_actionPopUpButton = OakCreateActionPopUpButton(YES);
 	_actionPopUpButton.bezelStyle = NSTexturedRoundedBezelStyle;
@@ -575,15 +575,15 @@ static void* kOakCommitWindowIncludeItemBinding = &kOakCommitWindowIncludeItemBi
 			}
 			[outputArray addObject:@"\n"];
 			[proxy connectFromServerWithOptions:@{
-				kOakCommitWindowStandardOutput : [outputArray componentsJoinedByString:@" "],
-				kOakCommitWindowReturnCode     : @0,
-				kOakCommitWindowContinue       : @(continueFlag),
+				kOakCommitWindowStandardOutput: [outputArray componentsJoinedByString:@" "],
+				kOakCommitWindowReturnCode:     @0,
+				kOakCommitWindowContinue:       @(continueFlag),
 			}];
 		}
 		else
 		{
 			[proxy connectFromServerWithOptions:@{
-				kOakCommitWindowReturnCode     : @1,
+				kOakCommitWindowReturnCode:     @1,
 			}];
 		}
 		[self saveCommitMessage];

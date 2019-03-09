@@ -1,5 +1,4 @@
 #import "TMPlugInController.h"
-#import <OakFoundation/NSFileManager Additions.h>
 #import <OakAppKit/NSAlert Additions.h>
 #import <OakSystem/application.h>
 #import <crash/info.h>
@@ -37,7 +36,7 @@ static id CreateInstanceOfPlugInClass (Class cl, TMPlugInController* controller)
 + (void)initialize
 {
 	[[NSUserDefaults standardUserDefaults] registerDefaults:@{
-		kUserDefaultsDisabledPlugInsKey : @[ @"io.emmet.EmmetTextmate" ]
+		kUserDefaultsDisabledPlugInsKey: @[ @"io.emmet.EmmetTextmate" ]
 	}];
 }
 

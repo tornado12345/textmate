@@ -32,14 +32,14 @@ static NSString* const kUserDefaultsFilterOutputType = @"filterOutputType";
 
 - (id)init
 {
-	if((self = [super initWithWindow:[[NSPanel alloc] initWithContentRect:NSZeroRect styleMask:(NSTitledWindowMask|NSClosableWindowMask|NSResizableWindowMask|NSMiniaturizableWindowMask) backing:NSBackingStoreBuffered defer:NO]]))
+	if((self = [super initWithWindow:[[NSPanel alloc] initWithContentRect:NSZeroRect styleMask:(NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable) backing:NSBackingStoreBuffered defer:NO]]))
 	{
 		self.outputType           = output::replace_input;
 		self.myConstraints        = [NSMutableArray new];
 
-		self.commandLabel         = OakCreateLabel(@"Command:", nil, NSRightTextAlignment);
+		self.commandLabel         = OakCreateLabel(@"Command:", nil, NSTextAlignmentRight);
 		self.commandComboBox      = OakCreateComboBox();
-		self.resultLabel          = OakCreateLabel(@"Result:", nil, NSRightTextAlignment);
+		self.resultLabel          = OakCreateLabel(@"Result:", nil, NSTextAlignmentRight);
 		self.resultPopUpButton    = OakCreatePopUpButton();
 		self.executeButton        = OakCreateButton(@"Execute");
 		self.cancelButton         = OakCreateButton(@"Cancel");
@@ -61,7 +61,7 @@ static NSString* const kUserDefaultsFilterOutputType = @"filterOutputType";
 		self.cancelButton.action  = @selector(cancel:);
 
 		self.objectController     = [[NSObjectController alloc] initWithContent:self];
-		self.commandHistoryList   = [[OakHistoryList alloc] initWithName:@"Filter Through Command History" stackSize:10 defaultItems:@"cat -n", nil];
+		self.commandHistoryList   = [[OakHistoryList alloc] initWithName:@"Filter Through Command History" stackSize:10 defaultItems:@"sort|uniq -c", @"seq 100", @"cat -n", nil];
 
 		self.window.title         = @"Filter Through Command";
 		self.window.delegate      = self;
@@ -73,12 +73,12 @@ static NSString* const kUserDefaultsFilterOutputType = @"filterOutputType";
 		[self commandChanged:nil];
 
 		NSDictionary* views = @{
-			@"commandLabel" : self.commandLabel,
-			@"command"      : self.commandComboBox,
-			@"resultLabel"  : self.resultLabel,
-			@"result"       : self.resultPopUpButton,
-			@"execute"      : self.executeButton,
-			@"cancel"       : self.cancelButton,
+			@"commandLabel": self.commandLabel,
+			@"command":      self.commandComboBox,
+			@"resultLabel":  self.resultLabel,
+			@"result":       self.resultPopUpButton,
+			@"execute":      self.executeButton,
+			@"cancel":       self.cancelButton,
 		};
 
 		NSView* contentView = self.window.contentView;

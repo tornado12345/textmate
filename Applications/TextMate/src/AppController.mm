@@ -47,7 +47,7 @@ void OakOpenDocuments (NSArray* paths, BOOL treatFilePackageAsFolder)
 	NSMutableArray<OakDocument*>* documents = [NSMutableArray array];
 	NSMutableArray* itemsToInstall = [NSMutableArray array];
 	NSMutableArray* plugInsToInstall = [NSMutableArray array];
-	BOOL enableInstallHandler = treatFilePackageAsFolder == NO && ([NSEvent modifierFlags] & NSAlternateKeyMask) == 0;
+	BOOL enableInstallHandler = treatFilePackageAsFolder == NO && ([NSEvent modifierFlags] & NSEventModifierFlagOption) == 0;
 	for(NSString* path in paths)
 	{
 		BOOL isDirectory = NO;
@@ -103,8 +103,8 @@ BOOL HasDocumentWindow (NSArray* windows)
 				{ @"About TextMate",        @selector(orderFrontAboutPanel:)               },
 				{ /* -------- */ },
 				{ @"Preferences…",          @selector(showPreferences:),            @","   },
-				{ @"Check for Updates",     @selector(performSoftwareUpdateCheck:)         },
-				{ @"Check for Test Builds", @selector(performSoftwareUpdateCheck:),       .modifierFlags = NSEventModifierFlagCommand|NSEventModifierFlagOption, .alternate = YES },
+				{ @"Check for Update",      @selector(performSoftwareUpdateCheck:)         },
+				{ @"Check for Test Build",  @selector(performSoftwareUpdateCheck:),       .modifierFlags = NSEventModifierFlagCommand|NSEventModifierFlagOption, .alternate = YES },
 				{ /* -------- */ },
 				{ @"Services",              .systemMenu = MBMenuTypeServices               },
 				{ /* -------- */ },
@@ -188,7 +188,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 				},
 				{ @"Find",
 					.submenu = {
-						{ @"Find…",                       @selector(orderFrontFindPanel:),          @"f", .tag = 1 },
+						{ @"Find and Replace…",           @selector(orderFrontFindPanel:),          @"f", .tag = 1 },
 						{ @"Find in Project…",            @selector(orderFrontFindPanel:),          @"F", .tag = 3 },
 						{ @"Find in Folder…",             @selector(orderFrontFindPanel:),                .tag = 4 },
 						{ /* -------- */ },
@@ -201,7 +201,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 						{ @"Find Previous",               @selector(findPrevious:),                 @"G"   },
 						{ @"Find All",                    @selector(findAllInSelection:),           @"f", .modifierFlags = NSEventModifierFlagCommand|NSEventModifierFlagOption },
 						{ /* -------- */ },
-						{ @"Find Behavior",
+						{ @"Find Options",
 							.submenu = {
 								{ @"Ignore Case",        @selector(toggleFindOption:), @"c", .tag =   2, .modifierFlags = NSEventModifierFlagCommand|NSEventModifierFlagOption },
 								{ @"Regular Expression", @selector(toggleFindOption:), @"r", .tag =   8, .modifierFlags = NSEventModifierFlagCommand|NSEventModifierFlagOption },
@@ -221,9 +221,10 @@ BOOL HasDocumentWindow (NSArray* windows)
 				},
 				{ @"Spelling",
 					.submenuRef = &spellingMenu, .submenu = {
-						{ @"Spelling…",                  @selector(showGuessPanel:),                @":"   },
-						{ @"Check Spelling",             @selector(checkSpelling:),                 @";"   },
-						{ @"Check Spelling as You Type", @selector(toggleContinuousSpellChecking:), @";", .modifierFlags = NSEventModifierFlagCommand|NSEventModifierFlagOption },
+						{ @"Spelling…",                   @selector(showGuessPanel:),                @":"   },
+						{ @"Check Document Now",          @selector(checkSpelling:),                 @";"   },
+						{ /* -------- */ },
+						{ @"Check Spelling While Typing", @selector(toggleContinuousSpellChecking:), @";", .modifierFlags = NSEventModifierFlagCommand|NSEventModifierFlagOption },
 						{ /* -------- */ },
 					}
 				},
@@ -391,13 +392,18 @@ BOOL HasDocumentWindow (NSArray* windows)
 				{ @"Minimize",               @selector(miniaturize:),           @"m" },
 				{ @"Zoom",                   @selector(performZoom:)                 },
 				{ /* -------- */ },
-				{ @"Select Next Tab",        @selector(selectNextTab:),         @"}" },
-				{ @"Select Previous Tab",    @selector(selectPreviousTab:),     @"{" },
-				{ @"Select Tab",             .delegate = OakSubmenuController.sharedInstance },
+				{ @"Show Previous Tab",      @selector(selectPreviousTab:),     .key = NSTabCharacter,          .modifierFlags = NSEventModifierFlagControl|NSEventModifierFlagShift },
+				{ @"Show Next Tab",          @selector(selectNextTab:),         .key = NSTabCharacter,          .modifierFlags = NSEventModifierFlagControl },
+				{ @"Show Previous Tab",      @selector(selectPreviousTab:),     .key = NSLeftArrowFunctionKey,  .modifierFlags = NSEventModifierFlagOption|NSEventModifierFlagCommand, .hidden = YES },
+				{ @"Show Next Tab",          @selector(selectNextTab:),         .key = NSRightArrowFunctionKey, .modifierFlags = NSEventModifierFlagOption|NSEventModifierFlagCommand, .hidden = YES },
+				{ @"Show Previous Tab",      @selector(selectPreviousTab:),     @"{", .hidden = YES },
+				{ @"Show Next Tab",          @selector(selectNextTab:),         @"}", .hidden = YES },
+				{ @"Show Tab",               .delegate = OakSubmenuController.sharedInstance },
+				{ /* -------- */ },
+				{ @"Move Tab to New Window", @selector(moveDocumentToNewWindow:)     },
+				{ @"Merge All Windows",      @selector(mergeAllWindows:)             },
 				{ /* -------- */ },
 				{ @"Bring All to Front",     @selector(arrangeInFront:)              },
-				{ @"Merge All Windows",      @selector(mergeAllWindows:)             },
-				{ @"Move Tab to New Window", @selector(moveDocumentToNewWindow:)     },
 			}
 		},
 		{ @"Help",
@@ -407,7 +413,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 		},
 	};
 
-	NSMenu* menu = MBCreateMenu(items, @"AMainMenu", [[OakMainMenu alloc] init]);
+	NSMenu* menu = MBCreateMenu(items, [[OakMainMenu alloc] initWithTitle:@"AMainMenu"]);
 	bundlesMenu.delegate    = self;
 	themesMenu.delegate     = self;
 	spellingMenu.delegate   = self;
@@ -448,9 +454,9 @@ BOOL HasDocumentWindow (NSArray* windows)
 			forwardMenuItem.keyEquivalent                = @"";
 
 			shiftLeftMenuItem.keyEquivalent              = @"[";
-			shiftLeftMenuItem.keyEquivalentModifierMask  = NSCommandKeyMask;
+			shiftLeftMenuItem.keyEquivalentModifierMask  = NSEventModifierFlagCommand;
 			shiftRightMenuItem.keyEquivalent             = @"]";
-			shiftRightMenuItem.keyEquivalentModifierMask = NSCommandKeyMask;
+			shiftRightMenuItem.keyEquivalentModifierMask = NSEventModifierFlagCommand;
 		}
 		else
 		{
@@ -458,9 +464,9 @@ BOOL HasDocumentWindow (NSArray* windows)
 			shiftRightMenuItem.keyEquivalent          = @"";
 
 			backMenuItem.keyEquivalent                = @"[";
-			backMenuItem.keyEquivalentModifierMask    = NSCommandKeyMask;
+			backMenuItem.keyEquivalentModifierMask    = NSEventModifierFlagCommand;
 			forwardMenuItem.keyEquivalent             = @"]";
-			forwardMenuItem.keyEquivalentModifierMask = NSCommandKeyMask;
+			forwardMenuItem.keyEquivalentModifierMask = NSEventModifierFlagCommand;
 		}
 	}
 }
@@ -488,9 +494,9 @@ BOOL HasDocumentWindow (NSArray* windows)
 	NSString* parms = [NSString stringWithFormat:@"v=%@&os=%zu.%zu.%zu", [[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding], oak::os_major(), oak::os_minor(), oak::os_patch()];
 	[swUpdate setSignee:key_chain_t::key_t("org.textmate.duff", "Allan Odgaard", "-----BEGIN PUBLIC KEY-----\nMIIBtjCCASsGByqGSM44BAEwggEeAoGBAPIE9PpXPK3y2eBDJ0dnR/D8xR1TiT9m\n8DnPXYqkxwlqmjSShmJEmxYycnbliv2JpojYF4ikBUPJPuerlZfOvUBC99ERAgz7\nN1HYHfzFIxVo1oTKWurFJ1OOOsfg8AQDBDHnKpS1VnwVoDuvO05gK8jjQs9E5LcH\ne/opThzSrI7/AhUAy02E9H7EOwRyRNLofdtPxpa10o0CgYBKDfcBscidAoH4pkHR\nIOEGTCYl3G2Pd1yrblCp0nCCUEBCnvmrWVSXUTVa2/AyOZUTN9uZSC/Kq9XYgqwj\nhgzqa8h/a8yD+ao4q8WovwGeb6Iso3WlPl8waz6EAPR/nlUTnJ4jzr9t6iSH9owS\nvAmWrgeboia0CI2AH++liCDvigOBhAACgYAFWO66xFvmF2tVIB+4E7CwhrSi2uIk\ndeBrpmNcZZ+AVFy1RXJelNe/cZ1aXBYskn/57xigklpkfHR6DGqpEbm6KC/47Jfy\ny5GEx+F/eBWEePi90XnLinytjmXRmS2FNqX6D15XNG1xJfjociA8bzC7s4gfeTUd\nlpQkBq2z71yitA==\n-----END PUBLIC KEY-----\n")];
 	[swUpdate setChannels:@{
-		kSoftwareUpdateChannelRelease : [NSURL URLWithString:[NSString stringWithFormat:@"%s/releases/release?%@", REST_API, parms]],
-		kSoftwareUpdateChannelBeta    : [NSURL URLWithString:[NSString stringWithFormat:@"%s/releases/beta?%@", REST_API, parms]],
-		kSoftwareUpdateChannelNightly : [NSURL URLWithString:[NSString stringWithFormat:@"%s/releases/nightly?%@", REST_API, parms]],
+		kSoftwareUpdateChannelRelease:    [NSURL URLWithString:[NSString stringWithFormat:@"%s/releases/release?%@", REST_API, parms]],
+		kSoftwareUpdateChannelPrerelease: [NSURL URLWithString:[NSString stringWithFormat:@"%s/releases/beta?%@", REST_API, parms]],
+		kSoftwareUpdateChannelCanary:     [NSURL URLWithString:[NSString stringWithFormat:@"%s/releases/nightly?%@", REST_API, parms]],
 	}];
 
 	settings_t::set_default_settings_path([[[NSBundle mainBundle] pathForResource:@"Default" ofType:@"tmProperties"] fileSystemRepresentation]);
@@ -503,8 +509,8 @@ BOOL HasDocumentWindow (NSArray* windows)
 		rename(src.c_str(), dst.c_str());
 
 	[[NSUserDefaults standardUserDefaults] registerDefaults:@{
-		@"NSRecentDocumentsLimit"   : @25,
-		@"WebKitDeveloperExtras"    : @YES,
+		@"NSRecentDocumentsLimit": @25,
+		@"WebKitDeveloperExtras":  @YES,
 	}];
 	RegisterDefaults();
 
@@ -574,7 +580,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 		NSString* promptUser = nil;
 		if(path::exists(prematureTerminationDuringRestore))
 			promptUser = @"Previous attempt of restoring your session caused an abnormal exit. Would you like to skip session restore?";
-		else if([NSEvent modifierFlags] & NSShiftKeyMask)
+		else if([NSEvent modifierFlags] & NSEventModifierFlagShift)
 			promptUser = @"By holding down shift (⇧) you have indicated that you wish to disable restoring the documents which were open in last session.";
 
 		if(promptUser)
@@ -765,7 +771,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 - (void)bundleItemChooserDidSelectItems:(id)sender
 {
 	for(id item in [sender selectedItems])
-		[NSApp sendAction:@selector(performBundleItemWithUUIDStringFrom:) to:nil from:@{ @"representedObject" : [item valueForKey:@"uuid"] }];
+		[NSApp sendAction:@selector(performBundleItemWithUUIDStringFrom:) to:nil from:@{ @"representedObject": [item valueForKey:@"uuid"] }];
 }
 
 // ===========================

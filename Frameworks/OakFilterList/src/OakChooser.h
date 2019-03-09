@@ -6,26 +6,26 @@ PUBLIC @interface OakFileTableCellView : NSTableCellView
 - (instancetype)initWithCloseButton:(NSButton*)closeButton;
 @end
 
-PUBLIC @interface OakChooser : NSResponder
-@property (nonatomic) NSWindow* window;
-
+PUBLIC @interface OakChooser : NSWindowController
 @property (nonatomic) SEL action;
 @property (nonatomic, weak) id target;
 
 @property (nonatomic) NSString* filterString;
 @property (nonatomic, readonly) NSArray* selectedItems;
 
-- (void)showWindow:(id)sender;
 - (void)showWindowRelativeToFrame:(NSRect)parentFrame;
-- (void)close;
 
 // For subclasses
-@property (nonatomic) NSArray*       items;
-@property (nonatomic) NSSearchField* searchField;
-@property (nonatomic) NSScrollView*  scrollView;
-@property (nonatomic) NSTableView*   tableView;
-@property (nonatomic) NSTextField*   statusTextField;
-@property (nonatomic) NSTextField*   itemCountTextField;
+@property (nonatomic) NSArray* items;
+@property (nonatomic, readonly) NSSearchField*      searchField;
+@property (nonatomic, readonly) NSScrollView*       scrollView;
+@property (nonatomic, readonly) NSTableView*        tableView;
+@property (nonatomic, readonly) NSVisualEffectView* footerView;
+@property (nonatomic, readonly) NSTextField*        statusTextField;
+@property (nonatomic, readonly) NSTextField*        itemCountTextField;
+- (NSBox*)makeDividerView;
+- (void)addTitlebarAccessoryView:(NSView*)titlebarView;
+- (void)updateScrollViewInsets;
 
 @property (nonatomic) BOOL drawTableViewAsHighlighted;
 - (void)updateFilterString:(NSString*)aString;

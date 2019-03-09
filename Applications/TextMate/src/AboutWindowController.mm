@@ -30,7 +30,7 @@ static NSData* Digest (NSString* someString)
 @end
 
 @implementation AboutWindowJSBridge
-+ (BOOL)isSelectorExcludedFromWebScript:(SEL)aSelector { return aSelector != @selector(addLicense); }
++ (BOOL)isSelectorExcludedFromWebScript:(SEL)aSelector { return aSelector != @selector(addLicense) && aSelector != @selector(themeColors); }
 + (BOOL)isKeyExcludedFromWebScript:(char const*)name   { return strcmp(name, "version") != 0 && strcmp(name, "copyright") != 0 && strcmp(name, "licensees") != 0; }
 + (NSString*)webScriptNameForSelector:(SEL)aSelector   { return NSStringFromSelector(aSelector); }
 + (NSString*)webScriptNameForKey:(char const*)name     { return @(name); }
@@ -50,17 +50,63 @@ static NSData* Digest (NSString* someString)
 	return LicenseManager.sharedInstance.owner;
 }
 
+- (NSString*)themeColors
+{
+	NSString* css = @":root {"
+		" --textColor:       #000000ff;"
+		" --backgroundColor: #f1f1f1ff;"
+		" --shadowColor:     #ffffffc0;"
+	"}";
+
+	if(@available(macos 10.14, *))
+	{
+		NSAppearanceName appearanceName = [NSApp.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]];
+		if([appearanceName isEqualToString:NSAppearanceNameDarkAqua])
+		{
+			css = @":root {"
+				" --textColor:       #ffffffff;"
+				" --backgroundColor: #1e1e1eff;"
+				" --shadowColor:     #1e1e1ec0;"
+			"}";
+		}
+	}
+	return css;
+}
+
 - (void)addLicense
 {
 	[LicenseManager.sharedInstance showAddLicenseWindow:self];
 }
 @end
 
-// ============================
+// ====================================
+// = Auto-reload on appearance change =
+// ====================================
+
+@interface AboutWindowWebView : WebView
+@property (nonatomic, copy) NSURL* lastURLRequested;
+@end
+
+@implementation AboutWindowWebView
+- (void)loadRequest:(NSURLRequest*)urlRequest
+{
+	self.lastURLRequested = urlRequest.URL;
+	[self.mainFrame loadRequest:urlRequest];
+}
+
+- (void)viewDidChangeEffectiveAppearance
+{
+	[super viewDidChangeEffectiveAppearance];
+	if(NSURL* url = self.lastURLRequested)
+		[self.mainFrame loadRequest:[NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringCacheData timeoutInterval:60]];
+}
+@end
+
+// ====================================
 
 @interface AboutWindowController () <NSWindowDelegate, NSToolbarDelegate, WebFrameLoadDelegate, WebPolicyDelegate>
 @property (nonatomic) NSToolbar* toolbar;
-@property (nonatomic) WebView* webView;
+@property (nonatomic) AboutWindowWebView* webView;
 @property (nonatomic) NSString* selectedPage;
 @end
 
@@ -98,7 +144,7 @@ static NSData* Digest (NSString* someString)
 	rect.origin.y = round(NSMinY(visibleRect) + dy*3/4);
 	rect.origin.x = NSMaxY(visibleRect) - NSMaxY(rect);
 
-	NSWindow* win = [[NSWindow alloc] initWithContentRect:rect styleMask:(NSTitledWindowMask|NSClosableWindowMask|NSResizableWindowMask|NSMiniaturizableWindowMask) backing:NSBackingStoreBuffered defer:NO];
+	NSWindow* win = [[NSWindow alloc] initWithContentRect:rect styleMask:(NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable) backing:NSBackingStoreBuffered defer:NO];
 	if((self = [super initWithWindow:win]))
 	{
 		self.toolbar = [[NSToolbar alloc] initWithIdentifier:@"About TextMate"];
@@ -114,7 +160,8 @@ static NSData* Digest (NSString* someString)
 		[win setDelegate:self];
 		[win setAutorecalculatesKeyViewLoop:YES];
 
-		self.webView = [[WebView alloc] initWithFrame:[contentView bounds]];
+		self.webView = [[AboutWindowWebView alloc] initWithFrame:[contentView bounds]];
+		self.webView.drawsBackground = NO;
 		self.webView.translatesAutoresizingMaskIntoConstraints = NO;
 		self.webView.frameLoadDelegate = self;
 		self.webView.policyDelegate = self;
@@ -127,7 +174,7 @@ static NSData* Digest (NSString* someString)
 		webViewPrefs.cacheModel     = WebCacheModelDocumentViewer;
 		self.webView.preferencesIdentifier = kAboutWindowPreferencesIdentifier;
 
-		NSDictionary* views = @{ @"webView" : self.webView };
+		NSDictionary* views = @{ @"webView": self.webView };
 		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[webView(>=200)]|" options:NSLayoutFormatAlignAllTop     metrics:nil views:views]];
 		[contentView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[webView(>=200)]|" options:NSLayoutFormatAlignAllLeading metrics:nil views:views]];
 	}
@@ -164,18 +211,18 @@ static NSData* Digest (NSString* someString)
 	_selectedPage = pageName;
 
 	NSDictionary* pages = @{
-		@"About"         : @"About",
-		@"Changes"       : @"Changes",
-		@"Bundles"       : @"Bundles",
-		@"Registration"  : @"Registration",
-		@"Legal"         : @"Legal",
-		@"Contributions" : @"Contributions"
+		@"About":         @"About",
+		@"Changes":       @"Changes",
+		@"Bundles":       @"Bundles",
+		@"Registration":  @"Registration",
+		@"Legal":         @"Legal",
+		@"Contributions": @"Contributions"
 	};
 
 	if(NSString* file = pages[pageName])
 	{
 		if(NSURL* url = [[NSBundle mainBundle] URLForResource:file withExtension:@"html"])
-			[[self.webView mainFrame] loadRequest:[NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringCacheData timeoutInterval:60]];
+			[self.webView loadRequest:[NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringCacheData timeoutInterval:60]];
 
 		[self.window setTitle:pageName];
 		[self.toolbar setSelectedItemIdentifier:pageName];
@@ -235,7 +282,7 @@ static NSData* Digest (NSString* someString)
 
 // ====================
 
-- (void)updateSelectTabMenu:(NSMenu*)aMenu
+- (void)updateShowTabMenu:(NSMenu*)aMenu
 {
 	if(![[self window] isKeyWindow])
 	{
@@ -260,7 +307,7 @@ static NSDictionary* RemoveOldCommits (NSDictionary* src)
 	NSMutableDictionary* res = [src mutableCopy];
 	NSMutableArray* commits = [NSMutableArray array];
 
-	NSInteger year = [[[[NSCalendar alloc] initWithCalendarIdentifier:NSGregorianCalendar] components:NSYearCalendarUnit fromDate:[NSDate date]] year];
+	NSInteger year = [[[[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian] components:NSCalendarUnitYear fromDate:[NSDate date]] year];
 	NSMutableArray* years = [NSMutableArray array];
 	for(size_t i = year-2; i <= year; ++i)
 		[years addObject:[NSString stringWithFormat:@"%4zu-", i]];
