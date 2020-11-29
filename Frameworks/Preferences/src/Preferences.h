@@ -1,8 +1,8 @@
-#import <oak/misc.h>
+@protocol PreferencesPaneProtocol <NSObject>
+@optional
+@property (nonatomic, readonly) NSImage* toolbarItemImage;
+@end
 
-@class MASPreferencesWindowController;
-
-PUBLIC @interface Preferences : NSResponder
-+ (instancetype)sharedInstance;
-- (void)showWindow:(id)sender;
+@interface Preferences : NSWindowController
+@property (class, readonly) Preferences* sharedInstance;
 @end

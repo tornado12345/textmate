@@ -10,20 +10,6 @@
 NSURL* const kURLLocationComputer  = [[NSURL alloc] initWithString:@"computer:///"];
 NSURL* const kURLLocationFavorites = [[NSURL alloc] initFileURLWithPath:[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/TextMate/Favorites"] isDirectory:YES];
 
-@implementation NSURL (CompatibilityWrapper)
-- (BOOL)tmHasDirectoryPath
-{
-	if([self respondsToSelector:@selector(hasDirectoryPath)])
-		return self.hasDirectoryPath; // MAC_OS_X_VERSION_10_11
-
-	NSString* urlString = self.absoluteString;
-	NSRange range = [urlString rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"?;"]];
-	if(range.location != NSNotFound)
-		urlString = [urlString substringToIndex:range.location];
-	return [urlString hasSuffix:@"/"];
-}
-@end
-
 @interface FileItem ()
 @property (nonatomic, readonly) BOOL alwaysShowFileExtension;
 @property (nonatomic, readwrite) NSImage* image;
@@ -63,7 +49,7 @@ static NSMutableDictionary* SchemeToClass;
 		self.URL = url;
 
 		NSNumber* flag;
-		BOOL disableSCMStatus = [url getResourceValue:&flag forKey:@"org.textmate.disable-scm-status" error:nil] && [flag boolValue];
+		BOOL disableSCMStatus = [url getResourceValue:&flag forKey:@"org.textmate.disable-scm-status" error:nil] && flag.boolValue;
 
 		[self updateFileProperties];
 		[self addSCMStatusObserver:url.isFileURL && !disableSCMStatus];
@@ -97,7 +83,7 @@ static NSMutableDictionary* SchemeToClass;
 - (BOOL)canRename
 {
 	NSNumber* flag;
-	return _URL.isFileURL && !self.isMissing && (![_URL getResourceValue:&flag forKey:NSURLIsVolumeKey error:nil] || ![flag boolValue]);
+	return _URL.isFileURL && !self.isMissing && (![_URL getResourceValue:&flag forKey:NSURLIsVolumeKey error:nil] || !flag.boolValue);
 }
 
 - (void)updateFileProperties
@@ -107,12 +93,12 @@ static NSMutableDictionary* SchemeToClass;
 
 	NSNumber* flag;
 
-	self.hidden          = [_URL getResourceValue:&flag forKey:NSURLIsHiddenKey error:nil] && [flag boolValue];
-	self.hiddenExtension = [_URL getResourceValue:&flag forKey:NSURLHasHiddenExtensionKey error:nil] && [flag boolValue];
-	self.symbolicLink    = [_URL getResourceValue:&flag forKey:NSURLIsSymbolicLinkKey error:nil] && [flag boolValue];
-	self.package         = !_symbolicLink && [_URL getResourceValue:&flag forKey:NSURLIsPackageKey error:nil] && [flag boolValue];
-	self.linkToDirectory = _symbolicLink && [self.resolvedURL getResourceValue:&flag forKey:NSURLIsDirectoryKey error:nil] && [flag boolValue];
-	self.linkToPackage   = _symbolicLink && [self.resolvedURL getResourceValue:&flag forKey:NSURLIsPackageKey error:nil] && [flag boolValue];;
+	self.hidden          = [_URL getResourceValue:&flag forKey:NSURLIsHiddenKey error:nil] && flag.boolValue;
+	self.hiddenExtension = [_URL getResourceValue:&flag forKey:NSURLHasHiddenExtensionKey error:nil] && flag.boolValue;
+	self.symbolicLink    = [_URL getResourceValue:&flag forKey:NSURLIsSymbolicLinkKey error:nil] && flag.boolValue;
+	self.package         = !_symbolicLink && [_URL getResourceValue:&flag forKey:NSURLIsPackageKey error:nil] && flag.boolValue;
+	self.linkToDirectory = _symbolicLink && [self.resolvedURL getResourceValue:&flag forKey:NSURLIsDirectoryKey error:nil] && flag.boolValue;
+	self.linkToPackage   = _symbolicLink && [self.resolvedURL getResourceValue:&flag forKey:NSURLIsPackageKey error:nil] && flag.boolValue;
 	self.finderTags      = [OakFinderTagManager finderTagsForURL:self.URL];
 	self.missing         = _missing && ![NSFileManager.defaultManager fileExistsAtPath:_URL.path];
 }
@@ -143,7 +129,7 @@ static NSMutableDictionary* SchemeToClass;
 
 - (BOOL)isDirectory
 {
-	return _URL.tmHasDirectoryPath;
+	return _URL.hasDirectoryPath;
 }
 
 - (NSString*)displayName
@@ -182,7 +168,7 @@ static NSMutableDictionary* SchemeToClass;
 		url = [url URLByResolvingSymlinksInPath];
 
 		NSNumber* flag;
-		if([url getResourceValue:&flag forKey:NSURLIsSymbolicLinkKey error:nil] && [flag boolValue])
+		if([url getResourceValue:&flag forKey:NSURLIsSymbolicLinkKey error:nil] && flag.boolValue)
 		{
 			NSError* error;
 			if(NSString* path = [NSFileManager.defaultManager destinationOfSymbolicLinkAtPath:_URL.path error:&error])
@@ -199,7 +185,7 @@ static NSMutableDictionary* SchemeToClass;
 		NSNumber* flag;
 		NSURL* parentURL;
 
-		if([_URL getResourceValue:&flag forKey:NSURLIsVolumeKey error:nil] && [flag boolValue])
+		if([_URL getResourceValue:&flag forKey:NSURLIsVolumeKey error:nil] && flag.boolValue)
 			return kURLLocationComputer;
 		else if([_URL getResourceValue:&parentURL forKey:NSURLParentDirectoryURLKey error:nil] && parentURL)
 			return parentURL;
@@ -209,16 +195,8 @@ static NSMutableDictionary* SchemeToClass;
 
 - (BOOL)isApplication
 {
-	// NSURLIsApplicationKey requires MAC_OS_X_VERSION_10_11
-
-	LSItemInfoRecord itemInfo;
-	if(_URL.isFileURL && LSCopyItemInfoForURL((__bridge CFURLRef)_URL, kLSRequestBasicFlagsOnly, &itemInfo) == noErr)
-	{
-		OptionBits flags = itemInfo.flags;
-		if(flags & kLSItemInfoIsApplication)
-			return YES;
-	}
-	return NO;
+	NSNumber* flag;
+	return _URL.isFileURL && [_URL getResourceValue:&flag forKey:NSURLIsApplicationKey error:nil] && flag.boolValue;
 }
 
 // ===========================================
@@ -253,7 +231,7 @@ static NSMutableDictionary* SchemeToClass;
 		for(FileItem* child in _children)
 		{
 			if(child.URL.isFileURL && _URL.isFileURL)
-				child.URL = [_URL URLByAppendingPathComponent:child.URL.lastPathComponent isDirectory:child.URL.tmHasDirectoryPath];
+				child.URL = [_URL URLByAppendingPathComponent:child.URL.lastPathComponent isDirectory:child.URL.hasDirectoryPath];
 		}
 	}
 

@@ -1,49 +1,27 @@
 #import "CrashReporter.h"
-#import "find_reports.h"
-#import <OakFoundation/NSString Additions.h>
 #import <Preferences/Keys.h>
-#import <network/post.h>
-#import <io/path.h>
-#import <text/format.h>
-#import <ns/ns.h>
-#import <oak/oak.h>
+#import <UserNotifications/UserNotifications.h>
+#import <oak/misc.h>
 
-NSString* const kUserDefaultsCrashReportsSent = @"CrashReportsSent";
+static NSString* const kUserDefaultsCrashReportsSent = @"CrashReportsSent";
 
-static std::string hardware_info (int field, bool integer = false)
+static NSString* GetHardwareInfo (int field, BOOL isInteger = NO)
 {
 	char buf[1024];
 	size_t bufSize = sizeof(buf);
 	int request[] = { CTL_HW, field };
 
-	if(sysctl(request, sizeofA(request), buf, &bufSize, NULL, 0) != -1)
+	if(sysctl(request, sizeofA(request), buf, &bufSize, nullptr, 0) != -1)
 	{
-		if(integer && bufSize == 4)
-			return std::to_string(*(int*)buf);
-		return std::string(buf, buf + bufSize - 1);
+		if(isInteger && bufSize == 4)
+			return [NSString stringWithFormat:@"%d", *(int*)buf];
+		return [[NSString alloc] initWithUTF8String:buf];
 	}
 
-	return "???";
+	return @"???";
 }
 
-static std::string create_gzipped_file (std::string const& path)
-{
-	std::string res = path::temp("gzipped_crash_log");
-	if(gzFile fp = gzopen(res.c_str(), "wb"))
-	{
-		std::string const text = path::content(path);
-		gzwrite(fp, text.data(), text.size());
-		gzclose(fp);
-	}
-	else
-	{
-		unlink(res.c_str());
-		res = NULL_STR;
-	}
-	return res;
-}
-
-@interface CrashReporter () <NSUserNotificationCenterDelegate>
+@interface CrashReporter () <UNUserNotificationCenterDelegate, NSUserNotificationCenterDelegate>
 @end
 
 @implementation CrashReporter
@@ -56,8 +34,29 @@ static std::string create_gzipped_file (std::string const& path)
 - (id)init
 {
 	if(self = [super init])
-		[[NSUserNotificationCenter defaultUserNotificationCenter] setDelegate:self];
+	{
+		if(@available(macos 10.14, *))
+		{
+			UNUserNotificationCenter.currentNotificationCenter.delegate = self;
+		}
+		else
+		{
+			NSUserNotificationCenter.defaultUserNotificationCenter.delegate = self;
+		}
+	}
 	return self;
+}
+
+- (void)userNotificationCenter:(UNUserNotificationCenter*)center didReceiveNotificationResponse:(UNNotificationResponse*)response withCompletionHandler:(void(^)(void))completionHandler API_AVAILABLE(macosx(10.14))
+{
+	if(NSString* urlString = response.notification.request.content.userInfo[@"url"])
+		[NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:urlString]];
+	completionHandler();
+}
+
+- (void)userNotificationCenter:(UNUserNotificationCenter*)center willPresentNotification:(UNNotification*)notification withCompletionHandler:(void(^)(UNNotificationPresentationOptions options))completionHandler API_AVAILABLE(macosx(10.14))
+{
+	completionHandler(UNNotificationPresentationOptionAlert);
 }
 
 - (BOOL)userNotificationCenter:(NSUserNotificationCenter*)center shouldPresentNotification:(NSUserNotification*)notification
@@ -69,7 +68,7 @@ static std::string create_gzipped_file (std::string const& path)
 {
 	NSDictionary* userInfo = notification.userInfo;
 	if(NSString* urlString = userInfo[@"url"])
-		[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:urlString]];
+		[NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:urlString]];
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)aNotification
@@ -77,87 +76,205 @@ static std::string create_gzipped_file (std::string const& path)
 	if(NSDictionary* userInfo = [aNotification userInfo])
 	{
 		if(NSUserNotification* notification = userInfo[NSApplicationLaunchUserNotificationKey])
-			[self userNotificationCenter:[NSUserNotificationCenter defaultUserNotificationCenter] didActivateNotification:notification];
+			[self userNotificationCenter:NSUserNotificationCenter.defaultUserNotificationCenter didActivateNotification:notification];
 	}
 }
 
-- (void)postNewCrashReportsToURLString:(NSString*)aURL
+- (void)postNewCrashReportsToURLString:(NSString*)urlString
 {
-	if([[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsDisableCrashReportingKey])
+	if([NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsDisableCrashReportingKey])
 		return;
 
-	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+	NSBackgroundActivityScheduler* activity = [[NSBackgroundActivityScheduler alloc] initWithIdentifier:[NSString stringWithFormat:@"%@.%@", NSBundle.mainBundle.bundleIdentifier, @"CrashReporting"]];
+	activity.interval = 30;
+	[activity scheduleWithBlock:^(NSBackgroundActivityCompletionHandler completionHandler){
+		NSDate* date   = [NSDate dateWithTimeIntervalSinceNow:-7*24*60*60];
+		NSURL* url     = [NSURL URLWithString:urlString];
+		NSString* name = NSProcessInfo.processInfo.processName;
+		[self postCrashReportsNotBeforeDate:date toURL:url forProcessName:name];
+		completionHandler(NSBackgroundActivityResultFinished);
+	}];
+}
 
-		// has sent: reports we already posted
-		std::set<std::string> hasSent;
-		for(NSString* path in [[NSUserDefaults standardUserDefaults] stringArrayForKey:kUserDefaultsCrashReportsSent])
-			hasSent.insert([path fileSystemRepresentation]);
+- (void)postCrashReportsNotBeforeDate:(NSDate*)date toURL:(NSURL*)postURL forProcessName:(NSString*)processName
+{
+	NSArray<NSString*>* canSend = [self reportsForProcessName:processName notBeforeDate:date];
 
-		// can send: all reports from the last week
-		std::set<std::string> canSend;
-		time_t const cutOffDate = time(nullptr) - 7*24*60*60;
-		for(auto pair : find_reports(to_s([[NSProcessInfo processInfo] processName])))
+	NSMutableSet<NSString*>* shouldSend = [NSMutableSet setWithArray:canSend];
+	if(NSArray<NSString*>* hasSent = [NSUserDefaults.standardUserDefaults stringArrayForKey:kUserDefaultsCrashReportsSent])
+	{
+		NSMutableSet* trimmedHasSent = [NSMutableSet setWithArray:hasSent];
+		[trimmedHasSent intersectSet:[NSSet setWithArray:canSend]];
+		if(trimmedHasSent.count < hasSent.count)
+			[NSUserDefaults.standardUserDefaults setObject:trimmedHasSent.allObjects forKey:kUserDefaultsCrashReportsSent];
+
+		[shouldSend minusSet:trimmedHasSent];
+	}
+
+	for(NSString* reportPath in shouldSend)
+	{
+		if(NSString* gzippedReport = [self pathForGZipCompressedFileAtPath:reportPath])
 		{
-			if(cutOffDate < pair.first)
-				canSend.insert(pair.second);
-		}
+			NSMutableURLRequest* request = [NSMutableURLRequest requestWithURL:postURL cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:60];
 
-		// should send: “can send - has sent”
-		std::vector<std::string> shouldSend;
-		std::set_difference(canSend.begin(), canSend.end(), hasSent.begin(), hasSent.end(), back_inserter(shouldSend));
+			NSData* body = [self dataForURLRequest:request withFormValues:@{
+				@"hardware": [NSString stringWithFormat:@"%@/%@/%@", GetHardwareInfo(HW_MODEL), GetHardwareInfo(HW_MACHINE), GetHardwareInfo(HW_NCPU, true)],
+				@"contact":  [NSUserDefaults.standardUserDefaults stringForKey:kUserDefaultsCrashReportsContactInfoKey] ?: @"Anonymous",
+				@"report":   [@"@" stringByAppendingString:gzippedReport],
+			}];
 
-		std::string __block contact;
-		if(!shouldSend.empty())
-		{
-			dispatch_sync(dispatch_get_main_queue(), ^{
-				contact = to_s([[NSUserDefaults standardUserDefaults] stringForKey:kUserDefaultsCrashReportsContactInfoKey]);
-			});
-		}
-
-		std::set<std::string> didSend;
-		for(auto report : shouldSend)
-		{
-			std::string gzippedReport = create_gzipped_file(report);
-			if(gzippedReport != NULL_STR)
-			{
-				std::map<std::string, std::string> payload, response;
-				payload["hardware"] = hardware_info(HW_MODEL) + "/" + hardware_info(HW_MACHINE) + "/" + hardware_info(HW_NCPU, true);
-				payload["contact"]  = contact;
-				payload["report"]   = "@" + gzippedReport;
-
-				long rc = post_to_server(to_s(aURL), payload, &response);
-				if(200 <= rc && rc < 300 || 400 <= rc && rc < 500) // we don’t resend reports on a 4xx failure.
+			NSURLSessionUploadTask* uploadTask = [NSURLSession.sharedSession uploadTaskWithRequest:request fromData:body completionHandler:^(NSData* data, NSURLResponse* response, NSError* error){
+				NSInteger rc = ((NSHTTPURLResponse*)response).statusCode;
+				if(200 <= rc && rc < 300 || 400 <= rc && rc < 500) // We don’t resend reports on a 4xx failure.
 				{
-					didSend.insert(report);
+					@synchronized(NSUserDefaults.standardUserDefaults) {
+						NSArray<NSString*>* updatedHasSent = @[ reportPath ];
+						if(NSArray<NSString*>* oldHasSent = [NSUserDefaults.standardUserDefaults stringArrayForKey:kUserDefaultsCrashReportsSent])
+							updatedHasSent = [updatedHasSent arrayByAddingObjectsFromArray:oldHasSent];
+						[NSUserDefaults.standardUserDefaults setObject:updatedHasSent forKey:kUserDefaultsCrashReportsSent];
+					}
 
-					auto location = response.find("location");
-					if(location != response.end())
+					if(NSString* locationURLString = ((NSHTTPURLResponse*)response).allHeaderFields[@"Location"])
 					{
-						NSString* path = [NSString stringWithCxxString:report];
-						NSString* url  = [NSString stringWithCxxString:location->second];
+						os_log(OS_LOG_DEFAULT, "Crash report available at %{public}@", locationURLString);
+						if(@available(macos 10.14, *))
+						{
+							[UNUserNotificationCenter.currentNotificationCenter requestAuthorizationWithOptions:UNAuthorizationOptionAlert completionHandler:^(BOOL granted, NSError* error){
+								if(granted)
+								{
+									UNMutableNotificationContent* content = [[UNMutableNotificationContent alloc] init];
+									content.title    = @"Crash Report Sent";
+									content.body     = @"Diagnostic information has been sent to MacroMates.com regarding your last crash.";
+									content.userInfo = @{ @"path": reportPath, @"url": locationURLString };
 
-						NSUserNotification* notification = [NSUserNotification new];
-						notification.title           = @"Crash Report Sent";
-						notification.informativeText = @"Diagnostic information has been sent to MacroMates.com regarding your last crash.";
-						notification.userInfo        = @{ @"path": path, @"url": url };
-						[[NSUserNotificationCenter defaultUserNotificationCenter] deliverNotification:notification];
+									UNNotificationRequest* request = [UNNotificationRequest requestWithIdentifier:[NSUUID UUID].UUIDString content:content trigger:nil];
+									[UNUserNotificationCenter.currentNotificationCenter addNotificationRequest:request withCompletionHandler:^(NSError* error){
+										if(error)
+											os_log_error(OS_LOG_DEFAULT, "Failed to show notification: %{public}@", error.localizedDescription);
+									}];
+								}
+								else
+								{
+									os_log_info(OS_LOG_DEFAULT, "User notifications disallowed");
+								}
+							}];
+						}
+						else
+						{
+							NSUserNotification* notification = [[NSUserNotification alloc] init];
+							notification.title           = @"Crash Report Sent";
+							notification.informativeText = @"Diagnostic information has been sent to MacroMates.com regarding your last crash.";
+							notification.userInfo        = @{ @"path": reportPath, @"url": locationURLString };
+							[NSUserNotificationCenter.defaultUserNotificationCenter deliverNotification:notification];
+						}
 					}
 				}
+				else
+				{
+					os_log_error(OS_LOG_DEFAULT, "Unexpected status code (%ld) from %{publuc}@", rc, request.URL);
+				}
+				unlink(gzippedReport.fileSystemRepresentation);
+			}];
+			[uploadTask resume];
+		}
+	}
+}
 
-				unlink(gzippedReport.c_str());
+// ==================
+// = Helper Methods =
+// ==================
+
+- (NSArray<NSString*>*)reportsForProcessName:(NSString*)processName notBeforeDate:(NSDate*)cutOffDate
+{
+	NSString* const directory  = @"~/Library/Logs/DiagnosticReports".stringByExpandingTildeInPath;
+	NSString* const timeFormat = [processName stringByAppendingString:@"_%F-%H%M%S"];
+
+	NSMutableArray<NSString*>* res = [NSMutableArray array];
+	for(NSString* fileName in [NSFileManager.defaultManager contentsOfDirectoryAtPath:directory error:nil])
+	{
+		if([fileName hasPrefix:processName])
+		{
+			struct tm bsdDate = { };
+			if(strptime(fileName.UTF8String, timeFormat.UTF8String, &bsdDate))
+			{
+				time_t seconds = mktime(&bsdDate);
+				if(seconds != -1 && seconds >= cutOffDate.timeIntervalSince1970)
+					[res addObject:[directory stringByAppendingPathComponent:fileName]];
 			}
 		}
+	}
+	return res;
+}
 
-		hasSent.insert(didSend.begin(), didSend.end());
-		std::vector<std::string> updatedHasSent;
-		std::set_intersection(canSend.begin(), canSend.end(), hasSent.begin(), hasSent.end(), back_inserter(updatedHasSent));
+- (NSData*)dataForURLRequest:(NSMutableURLRequest*)urlRequest withFormValues:(NSDictionary<NSString*, NSString*>*)payload
+{
+	NSString* const boundary = [NSUUID UUID].UUIDString;
 
-		NSMutableArray* array = [NSMutableArray array];
-		for(auto path : updatedHasSent)
-			[array addObject:[NSString stringWithCxxString:path]];
-		dispatch_async(dispatch_get_main_queue(), ^{
-			[[NSUserDefaults standardUserDefaults] setObject:array forKey:kUserDefaultsCrashReportsSent];
-		});
-	});
+	urlRequest.HTTPMethod = @"POST";
+	[urlRequest setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=\"%@\"", boundary] forHTTPHeaderField:@"Content-Type"];
+
+	NSMutableData* body = [NSMutableData data];
+	[payload enumerateKeysAndObjectsUsingBlock:^(NSString* name, NSString* value, BOOL* stop) {
+		NSMutableArray<NSString*>* head = [NSMutableArray arrayWithObject:[NSString stringWithFormat:@"--%@", boundary]];
+		NSData* data;
+
+		if([value hasPrefix:@"@"])
+		{
+			NSString* path = [value substringFromIndex:1];
+
+			[head addObject:[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"%@\"; filename=\"%@\"", name, path.lastPathComponent]];
+			[head addObject:@"Content-Type: application/octet-stream"];
+			data = [NSData dataWithContentsOfFile:path];
+		}
+		else
+		{
+			[head addObject:[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"%@\"", name]];
+			data = [value dataUsingEncoding:NSUTF8StringEncoding];
+		}
+
+		[body appendData:[[head componentsJoinedByString:@"\r\n"] dataUsingEncoding:NSUTF8StringEncoding]];
+		[body appendData:[@"\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+		[body appendData:data];
+		[body appendData:[@"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+	}];
+	[body appendData:[[NSString stringWithFormat:@"--%@--\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+
+	return body;
+}
+
+- (NSString*)pathForGZipCompressedFileAtPath:(NSString*)path
+{
+	NSString* res;
+	if(NSData* data = [NSData dataWithContentsOfFile:path])
+	{
+		NSString* gzPath = [NSString pathWithComponents:@[
+			NSTemporaryDirectory(),
+			NSBundle.mainBundle.bundleIdentifier ?: NSProcessInfo.processInfo.processName,
+			[NSString stringWithFormat:@"%@.gz", path.lastPathComponent],
+		]];
+
+		if([NSFileManager.defaultManager createDirectoryAtPath:gzPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil])
+		{
+			if(gzFile fp = gzopen(gzPath.fileSystemRepresentation, "wb"))
+			{
+				gzwrite(fp, data.bytes, data.length);
+				gzclose(fp);
+				res = gzPath;
+			}
+			else
+			{
+				os_log_error(OS_LOG_DEFAULT, "Failed creating file %{publuc}@", gzPath);
+			}
+		}
+		else
+		{
+			os_log_error(OS_LOG_DEFAULT, "Failed creating directory %{publuc}@", gzPath.stringByDeletingLastPathComponent);
+		}
+	}
+	else
+	{
+		os_log_error(OS_LOG_DEFAULT, "Failed reading %{publuc}@", path);
+	}
+	return res;
 }
 @end

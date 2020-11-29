@@ -1,3 +1,13 @@
+:root { --textColor:       #000000ff; }
+:root { --backgroundColor: #f1f1f1ff; }
+:root { --shadowColor:     #ffffffc0; }
+
+@media (prefers-color-scheme: dark) {
+	:root { --textColor:       #ffffffff; }
+	:root { --backgroundColor: #1e1e1eff; }
+	:root { --shadowColor:     #1e1e1ec0; }
+}
+
 html {
   font-size: 13px; }
 
@@ -18,7 +28,7 @@ body {
 @media screen and (-webkit-min-device-pixel-ratio: 2) {
   body {
     background-image: url("flower@2x.png");
-    background-size: 50%; } }
+    background-size: 363px 359px; } }
 body > h1, body > h2, body > p {
   text-shadow: 0 0 1px var(--backgroundColor), 0 1px 0 var(--shadowColor); }
 

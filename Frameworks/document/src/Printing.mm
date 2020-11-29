@@ -23,7 +23,7 @@
 @property (nonatomic) CGFloat fontSize;
 @property (nonatomic) CGFloat pageWidth;
 @property (nonatomic) CGFloat pageHeight;
-@property (nonatomic) BOOL needsLayout;
+@property (nonatomic) BOOL myNeedsLayout;
 @end
 
 #ifndef CONSTRAINT
@@ -37,7 +37,7 @@
 @implementation OakDocumentPrintableView
 + (void)initialize
 {
-	[[NSUserDefaults standardUserDefaults] registerDefaults:@{
+	[NSUserDefaults.standardUserDefaults registerDefaults:@{
 		@"OakPrintThemeUUID":       @(kMacClassicThemeUUID),
 		@"OakPrintFontSize":        @(11),
 		@"OakPrintHeaderAndFooter": @NO,
@@ -98,12 +98,12 @@
 {
 	NSEraseRect(aRect);
 	if(![NSGraphicsContext currentContextDrawingToScreen] && layout)
-		layout->draw((CGContextRef)[[NSGraphicsContext currentContext] graphicsPort], aRect, [self isFlipped], /* selection: */ ng::ranges_t(), /* highlight: */ ng::ranges_t(), /* draw background: */ false);
+		layout->draw(NSGraphicsContext.currentContext.CGContext, aRect, [self isFlipped], /* selection: */ ng::ranges_t(), /* highlight: */ ng::ranges_t(), /* draw background: */ false);
 }
 
 - (void)updateLayout
 {
-	if(!_needsLayout)
+	if(!_myNeedsLayout)
 		return;
 
 	pageRects.clear();
@@ -129,13 +129,13 @@
 		pageRect.size.height = self.pageHeight;
 	}
 
-	_needsLayout = NO;
+	_myNeedsLayout = NO;
 }
 
-- (void)setPageWidth:(CGFloat)newPageWidth    { if(_pageWidth  != newPageWidth)  { _needsLayout = YES; _pageWidth  = newPageWidth;  } }
-- (void)setPageHeight:(CGFloat)newPageHeight  { if(_pageHeight != newPageHeight) { _needsLayout = YES; _pageHeight = newPageHeight; } }
-- (void)setFontSize:(CGFloat)newFontSize      { if(_fontSize   != newFontSize)   { _needsLayout = YES; _fontSize   = newFontSize;   } }
-- (void)setThemeUUID:(NSString*)newThemeUUID  { if(![_themeUUID isEqualToString:newThemeUUID]) { _needsLayout = YES; _themeUUID  = newThemeUUID; } }
+- (void)setPageWidth:(CGFloat)newPageWidth    { if(_pageWidth  != newPageWidth)  { _myNeedsLayout = YES; _pageWidth  = newPageWidth;  } }
+- (void)setPageHeight:(CGFloat)newPageHeight  { if(_pageHeight != newPageHeight) { _myNeedsLayout = YES; _pageHeight = newPageHeight; } }
+- (void)setFontSize:(CGFloat)newFontSize      { if(_fontSize   != newFontSize)   { _myNeedsLayout = YES; _fontSize   = newFontSize;   } }
+- (void)setThemeUUID:(NSString*)newThemeUUID  { if(![_themeUUID isEqualToString:newThemeUUID]) { _myNeedsLayout = YES; _themeUUID  = newThemeUUID; } }
 @end
 
 // =========================================
@@ -219,7 +219,7 @@
 	{
 		NSPrintInfo* info = [self representedObject];
 		[[info dictionary] setObject:to_ns(themeUUIDs[anIndex]) forKey:@"OakPrintThemeUUID"];
-		[[NSUserDefaults standardUserDefaults] setObject:to_ns(themeUUIDs[anIndex]) forKey:@"OakPrintThemeUUID"];
+		[NSUserDefaults.standardUserDefaults setObject:to_ns(themeUUIDs[anIndex]) forKey:@"OakPrintThemeUUID"];
 	}
 }
 
@@ -241,7 +241,7 @@
 {
 	NSPrintInfo* info = [self representedObject];
 	[[info dictionary] setObject:@(flag) forKey:NSPrintHeaderAndFooter];
-	[[NSUserDefaults standardUserDefaults] setObject:@(flag) forKey:@"OakPrintHeaderAndFooter"];
+	[NSUserDefaults.standardUserDefaults setObject:@(flag) forKey:@"OakPrintHeaderAndFooter"];
 }
 
 - (BOOL)printHeaderAndFooter
@@ -253,7 +253,7 @@
 {
 	NSPrintInfo* info = [self representedObject];
 	[[info dictionary] setObject:size forKey:@"OakPrintFontSize"];
-	[[NSUserDefaults standardUserDefaults] setObject:size forKey:@"OakPrintFontSize"];
+	[NSUserDefaults.standardUserDefaults setObject:size forKey:@"OakPrintFontSize"];
 }
 
 - (NSNumber*)printFontSize

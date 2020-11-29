@@ -1,23 +1,20 @@
-#import "DownloadWindowController.h"
-#import <network/key_chain.h>
+extern NSString* const kUserDefaultsDisableSoftwareUpdateKey;
+extern NSString* const kUserDefaultsSoftwareUpdateChannelKey;
+extern NSString* const kUserDefaultsAskBeforeUpdatingKey;
+extern NSString* const kUserDefaultsLastSoftwareUpdateCheckKey;
 
-PUBLIC extern NSString* const kUserDefaultsDisableSoftwareUpdatesKey;
-PUBLIC extern NSString* const kUserDefaultsSoftwareUpdateChannelKey;
-PUBLIC extern NSString* const kUserDefaultsSubmitUsageInfoKey;
-PUBLIC extern NSString* const kUserDefaultsAskBeforeUpdatingKey;
+extern NSString* const kSoftwareUpdateChannelRelease;
+extern NSString* const kSoftwareUpdateChannelPrerelease;
+extern NSString* const kSoftwareUpdateChannelCanary;
 
-PUBLIC extern NSString* const kSoftwareUpdateChannelRelease;
-PUBLIC extern NSString* const kSoftwareUpdateChannelPrerelease;
-PUBLIC extern NSString* const kSoftwareUpdateChannelCanary;
+@interface SoftwareUpdate : NSObject
+@property (class, readonly) SoftwareUpdate* sharedInstance;
 
-PUBLIC @interface SoftwareUpdate : NSObject <DownloadWindowControllerDelegate>
-@property (nonatomic)           NSDictionary* channels;
-@property (nonatomic, readonly) NSDate*       lastPoll;
+@property (nonatomic) NSDictionary<NSString*, NSURL*>* channels;
 @property (nonatomic, readonly, getter = isChecking) BOOL checking;
-@property (nonatomic, readonly) NSString*     errorString;
+@property (nonatomic, readonly) NSString* errorString;
 
-- (void)setSignee:(key_chain_t::key_t const&)aSignee;
-
-+ (instancetype)sharedInstance;
-- (IBAction)checkForUpdates:(id)sender;
+- (void)checkForUpdate:(id)sender;
 @end
+
+NSComparisonResult OakCompareVersionStrings (NSString* lhsString, NSString* rhsString);

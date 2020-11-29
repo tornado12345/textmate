@@ -2,12 +2,8 @@
 #import <oak/debug.h>
 #import <oak/oak.h>
 
-OAK_DEBUG_VAR(OakToolTip);
-
 @interface OakToolTip : NSPanel
 {
-	OBJC_WATCH_LEAKS(OakToolTip);
-
 	NSTextField* field;
 
 	NSDate* didOpenAtDate; // ignore mouse moves for the next second
@@ -24,7 +20,7 @@ static __weak OakToolTip* LastToolTip;
 @implementation OakToolTip
 + (void)initialize
 {
-	[[NSUserDefaults standardUserDefaults] registerDefaults:@{
+	[NSUserDefaults.standardUserDefaults registerDefaults:@{
 		@"OakToolTipMouseMoveIgnorePeriod":  @1,
 		@"OakToolTipMouseDistanceThreshold": @5,
 	}];
@@ -32,7 +28,6 @@ static __weak OakToolTip* LastToolTip;
 
 - (id)init
 {
-	D(DBF_OakToolTip, bug("\n"););
 	if(self = [super initWithContentRect:NSZeroRect styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO])
 	{
 		NSFont* defaultFont = [NSFont toolTipsFontOfSize:0];
@@ -90,7 +85,6 @@ static __weak OakToolTip* LastToolTip;
 
 - (void)setStringValue:(NSString*)aString
 {
-	D(DBF_OakToolTip, bug("%s\n", [aString UTF8String]););
 	ASSERT(aString != nil);
 	[field setStringValue:aString];
 }
@@ -100,7 +94,7 @@ static __weak OakToolTip* LastToolTip;
 	if(!_enforceMouseThreshold)
 		return YES;
 
-	CGFloat ignorePeriod = [[NSUserDefaults standardUserDefaults] floatForKey:@"OakToolTipMouseMoveIgnorePeriod"];
+	CGFloat ignorePeriod = [NSUserDefaults.standardUserDefaults floatForKey:@"OakToolTipMouseMoveIgnorePeriod"];
 	if([[NSDate date] timeIntervalSinceDate:didOpenAtDate] < ignorePeriod)
 		return NO;
 
@@ -116,7 +110,7 @@ static __weak OakToolTip* LastToolTip;
 	NSPoint const& p = mousePositionWhenOpened;
 	CGFloat dist = hypot(p.x - aPoint.x, p.y - aPoint.y);
 
-	CGFloat moveThreshold = [[NSUserDefaults standardUserDefaults] floatForKey:@"OakToolTipMouseDistanceThreshold"];
+	CGFloat moveThreshold = [NSUserDefaults.standardUserDefaults floatForKey:@"OakToolTipMouseDistanceThreshold"];
 	return dist > moveThreshold;
 }
 
@@ -139,7 +133,6 @@ static __weak OakToolTip* LastToolTip;
 
 - (void)showAtLocation:(NSPoint)aPoint forScreen:(NSScreen*)aScreen
 {
-	D(DBF_OakToolTip, bug("%s\n", [NSStringFromPoint(aPoint) UTF8String]););
 	aScreen = aScreen ?: [NSScreen mainScreen];
 
 	NSRect r = [aScreen visibleFrame];

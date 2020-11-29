@@ -1,14 +1,42 @@
 #include "clipboard.h"
 #include <text/utf8.h>
 #include <text/hexdump.h>
+#include <text/format.h>
 
-clipboard_t::entry_t::entry_t (std::string const& content, std::map<std::string, std::string> const& options) : _content(content), _options(options)
+std::string const kClipboardOptionIndent    = "indent";
+std::string const kClipboardOptionComplete  = "complete";
+std::string const kClipboardOptionColumnar  = "columnar";
+
+clipboard_t::entry_t::entry_t (std::string const& content, std::map<std::string, std::string> const& options) : _contents(1, content), _options(options)
 {
-	if(!utf8::is_valid(_content.begin(), _content.end()))
+}
+
+clipboard_t::entry_t::entry_t (std::vector<std::string> const& contents, std::map<std::string, std::string> const& options) : _contents(contents), _options(options)
+{
+}
+
+static std::map<std::string, std::string> create_clipboard_options (std::string const& indent, bool complete, bool columnar)
+{
+	std::map<std::string, std::string> res;
+	if(indent != NULL_STR) res[kClipboardOptionIndent]    = indent;
+	if(complete)           res[kClipboardOptionComplete]  = "1";
+	if(columnar)           res[kClipboardOptionColumnar]  = "1";
+	return res;
+}
+
+clipboard_t::entry_t::entry_t (std::vector<std::string> const& contents, std::string const& indent, bool complete, bool columnar) : entry_t(contents, create_clipboard_options(indent, complete, columnar))
+{
+}
+
+std::string clipboard_t::entry_t::content () const
+{
+	std::string res = _contents.size() == 1 ? _contents.back() : text::join(_contents, "\n");
+	if(!utf8::is_valid(res.begin(), res.end()))
 	{
 		std::string const prefix = "*** malformed UTF-8 data on clipboard:\n";
-		_content = prefix + text::to_hex(_content.begin(), _content.end()) + "\n";
+		res = prefix + text::to_hex(res.begin(), res.end()) + "\n";
 	}
+	return res;
 }
 
 struct simple_clipboard_t : clipboard_t

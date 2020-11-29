@@ -2,7 +2,6 @@
 #define BUFFER_H_FCAAENIG
 
 #include <oak/basic_tree.h>
-#include <oak/misc.h>
 #include <oak/debug.h>
 
 namespace ng
@@ -11,8 +10,6 @@ namespace ng
 	{
 		struct memory_t
 		{
-			WATCH_LEAKS(ng::detail::memory_t);
-
 			struct helper_t
 			{
 				template <typename _InputIter>
@@ -59,10 +56,8 @@ namespace ng
 			size_t _offset;
 		};
 
-		struct PUBLIC storage_t
+		struct storage_t
 		{
-			WATCH_LEAKS(ng::detail::storage_t);
-
 			struct value_t
 			{
 				value_t (memory_t const& memory, size_t size) : _memory(memory), _size(size) { }

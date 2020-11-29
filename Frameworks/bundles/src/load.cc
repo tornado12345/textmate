@@ -4,8 +4,6 @@
 #include <text/format.h>
 #include <oak/debug.h>
 
-OAK_DEBUG_VAR(Bundles_Load);
-
 static std::string const kSeparatorString = "------------------------------------";
 
 static std::vector<oak::uuid_t> to_menu (plist::array_t const& uuids, std::string const& path)
@@ -16,7 +14,7 @@ static std::vector<oak::uuid_t> to_menu (plist::array_t const& uuids, std::strin
 		std::string const* str = boost::get<std::string>(&uuid);
 		if(str && oak::uuid_t::is_valid(*str))
 				res.push_back(*str == kSeparatorString ? bundles::kSeparatorUUID : oak::uuid_t(*str));
-		else	fprintf(stderr, "*** invalid uuid (%s) in ‘%s’\n", to_s(uuid).c_str(), path.c_str());
+		else	os_log_error(OS_LOG_DEFAULT, "Invalid uuid (%{public}s) in ‘%{public}s’", to_s(uuid).c_str(), path.c_str());
 	}
 	return res;
 }
@@ -71,8 +69,8 @@ std::pair<std::vector<bundles::item_ptr>, std::map< oak::uuid_t, std::vector<oak
 				{
 					std::string uuidStr;
 					if(plist::get_key_path(plist, bundles::kFieldUUID, uuidStr))
-							fprintf(stderr, "*** skip ‘%s’, invalid UUID ‘%s’\n", infoPlistPath.c_str(), uuidStr.c_str());
-					else	fprintf(stderr, "*** skip ‘%s’, no UUID\n", infoPlistPath.c_str());
+							os_log_error(OS_LOG_DEFAULT, "Skip ‘%{public}s’, invalid UUID ‘%{public}s’", infoPlistPath.c_str(), uuidStr.c_str());
+					else	os_log_error(OS_LOG_DEFAULT, "Skip ‘%{public}s’, no UUID", infoPlistPath.c_str());
 					break;
 				}
 
@@ -100,7 +98,6 @@ std::pair<std::vector<bundles::item_ptr>, std::map< oak::uuid_t, std::vector<oak
 				}
 				else if(loadedItems.find(bundleUUID) != loadedItems.end())
 				{
-					D(DBF_Bundles_Load, bug("skip ‘%s’ (eclipsed by local bundle)\n", infoPlistPath.c_str()););
 					bundle.reset();
 					skipEclipsedBundle = true;
 					break;
@@ -132,7 +129,7 @@ std::pair<std::vector<bundles::item_ptr>, std::map< oak::uuid_t, std::vector<oak
 					}
 					else
 					{
-						fprintf(stderr, "*** invalid uuid (\"%s\") in ‘%s’\n", submenuIter.first.c_str(), infoPlistPath.c_str());
+						os_log_error(OS_LOG_DEFAULT, "Invalid uuid (\"%{public}s\") in ‘%{public}s’", submenuIter.first.c_str(), infoPlistPath.c_str());
 					}
 				}
 
@@ -153,7 +150,7 @@ std::pair<std::vector<bundles::item_ptr>, std::map< oak::uuid_t, std::vector<oak
 			if(!bundle)
 			{
 				if(!skipEclipsedBundle)
-					fprintf(stderr, "*** not a bundle at ‘%s’\n", bundlePath.c_str());
+					os_log_error(OS_LOG_DEFAULT, "Not a bundle at ‘%{public}s’", bundlePath.c_str());
 				continue;
 			}
 
@@ -184,14 +181,14 @@ std::pair<std::vector<bundles::item_ptr>, std::map< oak::uuid_t, std::vector<oak
 						{
 							std::string uuidStr;
 							if(plist::get_key_path(plist, bundles::kFieldUUID, uuidStr))
-									fprintf(stderr, "*** skip ‘%s’, invalid UUID ‘%s’\n", itemPath.c_str(), uuidStr.c_str());
-							else	fprintf(stderr, "*** skip ‘%s’, no UUID\n", itemPath.c_str());
+									os_log_error(OS_LOG_DEFAULT, "Skip ‘%{public}s’, invalid UUID ‘%{public}s’", itemPath.c_str(), uuidStr.c_str());
+							else	os_log_error(OS_LOG_DEFAULT, "Skip ‘%{public}s’, no UUID", itemPath.c_str());
 							continue;
 						}
 
 						if(loadedItems.find(uuid) != loadedItems.end())
 						{
-							fprintf(stderr, "*** skip ‘%s’, item with same UUID loaded from ‘%s’\n", itemPath.c_str(), text::join((*std::find_if(items.begin(), items.end(), [&uuid](bundles::item_ptr const& item){ return item->uuid() == uuid; }))->paths(), "’, ‘").c_str());
+							os_log_error(OS_LOG_DEFAULT, "Skip ‘%{public}s’, item with same UUID loaded from ‘%{public}s’", itemPath.c_str(), text::join((*std::find_if(items.begin(), items.end(), [&uuid](bundles::item_ptr const& item){ return item->uuid() == uuid; }))->paths(), "’, ‘").c_str());
 							continue;
 						}
 
@@ -247,7 +244,7 @@ std::pair<std::vector<bundles::item_ptr>, std::map< oak::uuid_t, std::vector<oak
 		bundles::item_ptr item = items[i];
 		if(deltaItems.find(item->bundle_uuid()) != deltaItems.end())
 		{
-			fprintf(stderr, "*** orphaned delta (‘%s’) at: %s\n", item->name().c_str(), text::join(item->paths(), ", ").c_str());
+			os_log_error(OS_LOG_DEFAULT, "Orphaned delta (‘%{public}s’) at: %{public}s", item->name().c_str(), text::join(item->paths(), ", ").c_str());
 			items.erase(items.begin() + i);
 		}
 	}

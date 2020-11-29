@@ -1,28 +1,39 @@
 #import "Find.h"
 #import "FFResultNode.h"
-#import "FindWindowController.h"
 #import "FFResultsViewController.h"
+#import "FFTextFieldViewController.h"
 #import "FFDocumentSearch.h"
 #import "CommonAncestor.h"
-#import "Strings.h"
+#import "FFFolderMenu.h"
+#import "FFStatusBarViewController.h"
 #import <OakFoundation/OakFindProtocol.h>
 #import <OakFoundation/NSString Additions.h>
+#import <OakFoundation/OakFoundation.h>
+#import <OakFoundation/OakHistoryList.h>
 #import <OakAppKit/NSAlert Additions.h>
+#import <OakAppKit/NSMenuItem Additions.h>
 #import <OakAppKit/OakAppKit.h>
 #import <OakAppKit/OakPasteboard.h>
+#import <OakAppKit/OakTransitionViewController.h>
 #import <OakAppKit/OakUIConstructionFunctions.h>
+#import <MenuBuilder/MenuBuilder.h>
+#import <Preferences/Keys.h>
 #import <ns/ns.h>
 #import <text/types.h>
 #import <text/utf8.h>
 #import <regexp/format_string.h>
+#import <regexp/regexp.h>
 #import <document/OakDocument.h>
 #import <document/OakDocumentController.h>
+#import <io/path.h>
 #import <settings/settings.h>
 
-OAK_DEBUG_VAR(Find_Base);
-
+static NSString* const kUserDefaultsFolderOptionsKey               = @"Folder Search Options";
+static NSString* const kUserDefaultsFindResultsHeightKey           = @"findResultsHeight";
+static NSString* const kUserDefaultsDefaultFindGlobsKey            = @"defaultFindInFolderGlobs";
 static NSString* const kUserDefaultsKeepSearchResultsOnDoubleClick = @"keepSearchResultsOnDoubleClick";
-static NSString* const kSearchMarkIdentifier = @"search";
+static NSString* const kSearchMarkIdentifier                       = @"search";
+static NSString* const FFFindWasTriggeredByEnter                   = @"FFFindWasTriggeredByEnter";
 
 enum FindActionTag
 {
@@ -36,17 +47,89 @@ enum FindActionTag
 	FindActionReplace,
 };
 
-@interface Find () <OakFindServerProtocol>
-@property (nonatomic) FindWindowController* windowController;
+@implementation FindMatch
+- (instancetype)initWithUUID:(NSUUID*)uuid firstRange:(text::range_t const&)firstRange lastRange:(text::range_t const&)lastRange
+{
+	if(self = [super init])
+	{
+		_UUID       = uuid;
+		_firstRange = firstRange;
+		_lastRange  = lastRange;
+	}
+	return self;
+}
+@end
+
+// ========================
+// = FindWindowController =
+// ========================
+
+static NSButton* OakCreateHistoryButton (NSString* toolTip)
+{
+	NSButton* res = [[NSButton alloc] initWithFrame:NSZeroRect];
+	res.bezelStyle = NSBezelStyleRoundedDisclosure;
+	res.buttonType = NSButtonTypeMomentaryLight;
+	res.title      = @"";
+	res.toolTip    = toolTip;
+	res.accessibilityLabel = toolTip;
+	[res setContentCompressionResistancePriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
+	return res;
+}
+
+@interface Find () <OakFindServerProtocol, OakUserDefaultsObserver, NSWindowDelegate, NSMenuDelegate>
+{
+	NSObjectController*        _objectController;
+
+	FFTextFieldViewController*   _findTextFieldViewController;
+	FFTextFieldViewController*   _replaceTextFieldViewController;
+
+	NSPopUpButton*               _wherePopUpButton;
+	NSButton*                    _findAllButton;
+	NSButton*                    _findNextButton;
+
+	OakTransitionViewController* _transitionViewController;
+
+	FFStatusBarViewController*   _statusBarViewController;
+	NSGridView*                  _gridView;
+	NSStackView*                 _actionButtonsStackView;
+}
+@property (nonatomic, readonly)           FFResultsViewController* resultsViewController;
+@property (nonatomic) BOOL                showsResultsOutlineView;
+
+@property (nonatomic) NSString*           otherFolder;
+@property (nonatomic, readonly) NSString* searchFolder;
+
+@property (nonatomic) NSString* globString;
+
+@property (nonatomic) BOOL ignoreCase;
+@property (nonatomic) BOOL ignoreWhitespace;
+@property (nonatomic) BOOL regularExpression;
+@property (nonatomic) BOOL wrapAround;
+@property (nonatomic) BOOL fullWords; // not implemented
+
+@property (nonatomic) BOOL searchHiddenFolders;
+@property (nonatomic) BOOL searchFolderLinks;
+@property (nonatomic) BOOL searchFileLinks;
+@property (nonatomic) BOOL searchBinaryFiles;
+
+@property (nonatomic) OakHistoryList<NSString*>* globHistoryList;
+@property (nonatomic) OakHistoryList<NSString*>* recentFolders;
+@property (nonatomic) CGFloat                    findResultsHeight;
+
+@property (nonatomic, readonly) BOOL  canIgnoreWhitespace;
+@property (nonatomic) BOOL            canEditGlob;
+@property (nonatomic) BOOL            canReplaceInDocument;
+
 @property (nonatomic) FFDocumentSearch* documentSearch;
-@property (nonatomic) FFResultNode* results;
-@property (nonatomic, weak) id <FindDelegate> resultsDelegate;
-@property (nonatomic) NSUInteger countOfMatches;
-@property (nonatomic) NSUInteger countOfExcludedMatches;
-@property (nonatomic) NSUInteger countOfReadOnlyMatches;
-@property (nonatomic) NSUInteger countOfExcludedReadOnlyMatches;
-@property (nonatomic) BOOL closeWindowOnSuccess;
-@property (nonatomic) BOOL performingFolderSearch;
+@property (nonatomic) FFResultNode*     results;
+
+@property (nonatomic) NSUInteger        countOfMatches;
+@property (nonatomic) NSUInteger        countOfExcludedMatches;
+@property (nonatomic) NSUInteger        countOfReadOnlyMatches;
+@property (nonatomic) NSUInteger        countOfExcludedReadOnlyMatches;
+
+@property (nonatomic) BOOL              closeWindowOnSuccess;
+@property (nonatomic) BOOL              performingFolderSearch;
 
 // =========================
 // = OakFindProtocolServer =
@@ -59,48 +142,649 @@ enum FindActionTag
 - (void)didReplace:(NSUInteger)aNumber occurrencesOf:(NSString*)aFindString with:(NSString*)aReplacementString;
 @end
 
-NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
-
 @implementation Find
++ (NSSet*)keyPathsForValuesAffectingCanIgnoreWhitespace  { return [NSSet setWithObject:@"regularExpression"]; }
++ (NSSet*)keyPathsForValuesAffectingIgnoreWhitespace     { return [NSSet setWithObject:@"regularExpression"]; }
+
 + (instancetype)sharedInstance
 {
 	static Find* sharedInstance = [self new];
 	return sharedInstance;
 }
 
-- (FindWindowController*)windowController
++ (void)initialize
 {
-	if(!_windowController)
+	[NSUserDefaults.standardUserDefaults registerDefaults:@{
+		kUserDefaultsDefaultFindGlobsKey: @[ @"*", @"*.txt", @"*.{c,h}" ],
+	}];
+}
+
+- (id)init
+{
+	if(self = [super initWithWindowNibName:@"UNUSED"])
 	{
-		_windowController = [FindWindowController new];
-		_windowController.nextResponder = self;
+		_objectController = [[NSObjectController alloc] initWithContent:self];
+		_projectFolder    = NSHomeDirectory();
 
-		_windowController.resultsViewController.selectResultAction      = @selector(didSelectResult:);
-		_windowController.resultsViewController.removeResultAction      = @selector(didRemoveResult:);
-		_windowController.resultsViewController.doubleClickResultAction = @selector(didDoubleClickResult:);
-		_windowController.resultsViewController.target                  = self;
+		self.globHistoryList = [[OakHistoryList alloc] initWithName:@"Find in Folder Globs.default" stackSize:10 fallbackUserDefaultsKey:kUserDefaultsDefaultFindGlobsKey];
+		self.recentFolders   = [[OakHistoryList alloc] initWithName:@"findRecentPlaces" stackSize:21];
 
-		[_windowController.replaceAllButton bind:NSTitleBinding toObject:self withKeyPath:@"replaceAllButtonTitle" options:nil];
-		[_windowController.replaceAllButton bind:@"enabled2" toObject:self withKeyPath:@"canReplaceAll" options:nil];
-
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowWillClose:) name:NSWindowWillCloseNotification object:_windowController.window];
+		_findTextFieldViewController    = [[FFTextFieldViewController alloc] initWithPasteboard:OakPasteboard.findPasteboard grammarName:@"source.regexp.oniguruma"];
+		_replaceTextFieldViewController = [[FFTextFieldViewController alloc] initWithPasteboard:OakPasteboard.replacePasteboard grammarName:@"textmate.format-string"];
 	}
-	return _windowController;
+	return self;
+}
+
+- (void)loadWindow
+{
+	NSRect r = NSScreen.mainScreen.visibleFrame;
+	if(NSWindow* window = [[NSPanel alloc] initWithContentRect:NSMakeRect(NSMidX(r)-100, NSMidY(r)+100, 200, 200) styleMask:(NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable) backing:NSBackingStoreBuffered defer:NO])
+	{
+		window.collectionBehavior = NSWindowCollectionBehaviorMoveToActiveSpace|NSWindowCollectionBehaviorFullScreenAuxiliary;
+		window.delegate           = self;
+		window.frameAutosaveName  = @"Find";
+		window.hidesOnDeactivate  = NO;
+
+		_resultsViewController = [[FFResultsViewController alloc] init];
+		_resultsViewController.selectResultAction      = @selector(didSelectResult:);
+		_resultsViewController.removeResultAction      = @selector(didRemoveResult:);
+		_resultsViewController.doubleClickResultAction = @selector(didDoubleClickResult:);
+		_resultsViewController.target                  = self;
+
+		[_resultsViewController bind:@"replaceString"           toObject:_replaceTextFieldViewController withKeyPath:@"stringValue" options:nil];
+		[_resultsViewController bind:@"showReplacementPreviews" toObject:_replaceTextFieldViewController withKeyPath:@"hasFocus"    options:nil];
+
+		_transitionViewController = [[OakTransitionViewController alloc] init];
+
+		_statusBarViewController = [[FFStatusBarViewController alloc] init];
+		_statusBarViewController.stopAction = @selector(stopSearch:);
+		_statusBarViewController.stopTarget = self;
+
+		NSDictionary* views = @{
+			@"options": self.gridView,
+			@"results": _transitionViewController.view,
+			@"status":  _statusBarViewController.view,
+			@"buttons": self.actionButtonsStackView,
+		};
+
+		NSView* contentView = [[NSView alloc] initWithFrame:NSZeroRect];
+
+		OakAddAutoLayoutViewsToSuperview(views.allValues, contentView);
+		OakSetupKeyViewLoop(@[ self.gridView, _transitionViewController.view, self.actionButtonsStackView ]);
+
+		[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[options]|"                               options:0                                                            metrics:nil views:views]];
+		[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[options]-[results]-[status]-[buttons]-|" options:NSLayoutFormatAlignAllLeading|NSLayoutFormatAlignAllTrailing metrics:nil views:views]];
+
+		window.contentView = contentView;
+		window.initialFirstResponder = _findTextFieldViewController.view;
+		window.defaultButtonCell = _findNextButton.cell;
+
+		// setup find/replace strings/options
+		[self userDefaultsDidChange:nil];
+		[self findClipboardDidChange:nil];
+		[self replaceClipboardDidChange:nil];
+
+		OakObserveUserDefaults(self);
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(findClipboardDidChange:) name:OakPasteboardDidChangeNotification object:OakPasteboard.findPasteboard];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(replaceClipboardDidChange:) name:OakPasteboardDidChangeNotification object:OakPasteboard.replacePasteboard];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(textViewWillPerformFindOperation:) name:@"OakTextViewWillPerformFindOperation" object:nil];
+
+		[window layoutIfNeeded]; // Incase autosaved window frame includes results, we want to shrink the frame
+		self.window = window;
+		[self updateWindowTitle];
+	}
+}
+
+- (void)menuNeedsUpdate:(NSMenu*)aMenu
+{
+	[aMenu removeAllItems];
+	[NSApp sendAction:@selector(updateShowTabMenu:) to:nil from:aMenu];
+}
+
+- (NSGridView*)gridView
+{
+	if(!_gridView)
+	{
+		NSTextField* findLabel              = OakCreateLabel(@"Find:");
+		NSButton* findHistoryButton         = OakCreateHistoryButton(@"Show Find History");
+
+		NSButton* countButton               = OakCreateButton(@"Σ", NSBezelStyleSmallSquare);
+		countButton.toolTip                 = @"Show Results Count";
+		countButton.accessibilityLabel      = countButton.toolTip;
+
+		NSTextField* replaceLabel           = OakCreateLabel(@"Replace:");
+		NSButton* replaceHistoryButton      = OakCreateHistoryButton(@"Show Replace History");
+
+		NSTextField* optionsLabel           = OakCreateLabel(@"Options:");
+
+		NSButton* ignoreCaseCheckBox        = OakCreateCheckBox(@"Ignore Case");
+		NSButton* ignoreWhitespaceCheckBox  = OakCreateCheckBox(@"Ignore Whitespace");
+		NSButton* regularExpressionCheckBox = OakCreateCheckBox(@"Regular Expression");
+		NSButton* wrapAroundCheckBox        = OakCreateCheckBox(@"Wrap Around");
+
+		NSTextField* whereLabel             = OakCreateLabel(@"In:");
+		_wherePopUpButton                   = OakCreatePopUpButton(NO, nil, whereLabel);
+		NSTextField* matchingLabel          = OakCreateLabel(@"matching");
+		NSComboBox* globTextField           = OakCreateComboBox(matchingLabel);
+		NSPopUpButton* actionsPopUpButton   = OakCreateActionPopUpButton(YES /* bordered */);
+
+		NSGridView* optionsGridView = [NSGridView gridViewWithViews:@[
+			@[ regularExpressionCheckBox, ignoreWhitespaceCheckBox ],
+			@[ ignoreCaseCheckBox,        wrapAroundCheckBox       ],
+		]];
+
+		optionsGridView.rowSpacing    = 8;
+		optionsGridView.columnSpacing = 20;
+		optionsGridView.rowAlignment  = NSGridRowAlignmentFirstBaseline;
+		[optionsGridView rowAtIndex:1].bottomPadding = 12;
+
+		NSStackView* whereStackView = [NSStackView stackViewWithViews:@[
+			_wherePopUpButton, matchingLabel, globTextField
+		]];
+		whereStackView.alignment = NSLayoutAttributeLastBaseline;
+		[whereStackView setHuggingPriority:NSLayoutPriorityDefaultHigh-1 forOrientation:NSLayoutConstraintOrientationVertical];
+
+		_gridView = [NSGridView gridViewWithViews:@[
+			@[ findLabel,    _findTextFieldViewController.view,    findHistoryButton,   countButton ],
+			@[ replaceLabel, _replaceTextFieldViewController.view, replaceHistoryButton             ],
+			@[ optionsLabel, optionsGridView                                                        ],
+			@[ whereLabel,   whereStackView,                       actionsPopUpButton               ],
+		]];
+
+		_gridView.rowSpacing    = 8;
+		_gridView.columnSpacing = 4;
+		_gridView.yPlacement    = NSGridCellPlacementTop;
+
+		[_gridView rowAtIndex:0].topPadding        = 20;
+		[_gridView columnAtIndex:0].xPlacement     = NSGridCellPlacementTrailing;
+		[_gridView columnAtIndex:0].leadingPadding = 20;
+		[_gridView columnAtIndex:1].leadingPadding = 4;
+		[_gridView columnAtIndex:3].leadingPadding = 4;
+		[_gridView columnAtIndex:_gridView.numberOfColumns-1].trailingPadding = 20;
+
+		[_gridView mergeCellsInHorizontalRange:NSMakeRange(2, 2) verticalRange:NSMakeRange(3, 1)];
+		[_gridView cellAtColumnIndex:2 rowIndex:3].xPlacement = NSGridCellPlacementFill;
+
+		for(NSUInteger row = 0; row < _gridView.numberOfRows; ++row)
+			[_gridView cellAtColumnIndex:0 rowIndex:row].yPlacement = NSGridCellPlacementNone;
+
+		for(NSUInteger row = 0; row < 2; ++row)
+		{
+			[_gridView cellAtColumnIndex:0 rowIndex:row].rowAlignment = NSGridRowAlignmentFirstBaseline;
+			[_gridView cellAtColumnIndex:1 rowIndex:row].rowAlignment = NSGridRowAlignmentFirstBaseline;
+		}
+
+		[_gridView cellAtColumnIndex:0 rowIndex:2].customPlacementConstraints = @[ [optionsLabel.firstBaselineAnchor constraintEqualToAnchor:regularExpressionCheckBox.firstBaselineAnchor constant:0] ];
+		[_gridView cellAtColumnIndex:0 rowIndex:3].customPlacementConstraints = @[ [whereLabel.firstBaselineAnchor constraintEqualToAnchor:matchingLabel.firstBaselineAnchor constant:0] ];
+
+		[_gridView setContentHuggingPriority:NSLayoutPriorityWindowSizeStayPut forOrientation:NSLayoutConstraintOrientationVertical];
+
+		_findTextFieldViewController.view.accessibilityTitleUIElement    = findLabel;
+		_replaceTextFieldViewController.view.accessibilityTitleUIElement = replaceLabel;
+
+		[countButton.widthAnchor constraintEqualToAnchor:findHistoryButton.widthAnchor].active = YES;
+		[countButton.heightAnchor constraintEqualToAnchor:findHistoryButton.heightAnchor].active = YES;
+		[_wherePopUpButton.widthAnchor constraintLessThanOrEqualToConstant:150].active = YES;
+
+		[self updateSearchInPopUpMenu];
+
+		// =============================
+		// = Create action pop-up menu =
+		// =============================
+
+		MBMenu const items = {
+			{ /* Placeholder */ },
+			{ @"Search",                               @selector(nop:)                                    },
+			{ @"Binary Files",                         @selector(toggleSearchBinaryFiles:),   .indent = 1 },
+			{ @"Hidden Folders",                       @selector(toggleSearchHiddenFolders:), .indent = 1 },
+			{ @"Symbolic Links to Folders",            @selector(toggleSearchFolderLinks:),   .indent = 1 },
+			{ @"Symbolic Links to Files",              @selector(toggleSearchFileLinks:),     .indent = 1 },
+			{ /* -------- */ },
+			{ @"Collapse Results",                     @selector(toggleCollapsedState:),      @"1", .modifierFlags = NSEventModifierFlagCommand|NSEventModifierFlagOption, .target = _resultsViewController },
+			{ @"Select Result",                        .delegate = self                                   },
+			{ /* -------- */ },
+			{ @"Copy Matching Parts",                  @selector(copyMatchingParts:)                      },
+			{ @"Copy Matching Parts With Filenames",   @selector(copyMatchingPartsWithFilename:)          },
+			{ @"Copy Entire Lines",                    @selector(copyEntireLines:)                        },
+			{ @"Copy Entire Lines With Filenames",     @selector(copyEntireLinesWithFilename:)            },
+			{ @"Copy Replacements",                    @selector(copyReplacements:)                       },
+			{ /* -------- */ },
+			{ @"Check All",                            @selector(checkAll:)                               },
+			{ @"Uncheck All",                          @selector(uncheckAll:)                             },
+		};
+
+		if(NSMenu* actionMenu = MBCreateMenu(items))
+			actionsPopUpButton.menu = actionMenu;
+
+		// =============================
+
+		findHistoryButton.action    = @selector(showHistory:);
+		findHistoryButton.target    = _findTextFieldViewController;
+		replaceHistoryButton.action = @selector(showHistory:);
+		replaceHistoryButton.target = _replaceTextFieldViewController;
+		countButton.action          = @selector(countOccurrences:);
+
+		[globTextField                        bind:NSValueBinding         toObject:_objectController            withKeyPath:@"content.globHistoryList.head" options:nil];
+		[globTextField                        bind:NSContentValuesBinding toObject:_objectController            withKeyPath:@"content.globHistoryList.list" options:nil];
+		[globTextField                        bind:NSEnabledBinding       toObject:_objectController            withKeyPath:@"content.canEditGlob"          options:nil];
+		[ignoreCaseCheckBox                   bind:NSValueBinding         toObject:_objectController            withKeyPath:@"content.ignoreCase"           options:nil];
+		[ignoreWhitespaceCheckBox             bind:NSValueBinding         toObject:_objectController            withKeyPath:@"content.ignoreWhitespace"     options:nil];
+		[regularExpressionCheckBox            bind:NSValueBinding         toObject:_objectController            withKeyPath:@"content.regularExpression"    options:nil];
+		[wrapAroundCheckBox                   bind:NSValueBinding         toObject:_objectController            withKeyPath:@"content.wrapAround"           options:nil];
+		[ignoreWhitespaceCheckBox             bind:NSEnabledBinding       toObject:_objectController            withKeyPath:@"content.canIgnoreWhitespace"  options:nil];
+		[countButton                          bind:NSEnabledBinding       toObject:_findTextFieldViewController withKeyPath:@"stringValue.length"           options:nil];
+
+		OakSetupKeyViewLoop(@[ _gridView, _findTextFieldViewController.view, _replaceTextFieldViewController.view, countButton, regularExpressionCheckBox, ignoreWhitespaceCheckBox, ignoreCaseCheckBox, wrapAroundCheckBox, _wherePopUpButton, globTextField, actionsPopUpButton ]);
+	}
+	return _gridView;
+}
+
+- (NSStackView*)actionButtonsStackView
+{
+	if(!_actionButtonsStackView)
+	{
+		_findAllButton                 = OakCreateButton(@"Find All");
+		NSButton* replaceAllButton     = OakCreateButton(@"Replace All");
+		NSButton* replaceButton        = OakCreateButton(@"Replace");
+		NSButton* replaceAndFindButton = OakCreateButton(@"Replace & Find");
+		NSButton* findPreviousButton   = OakCreateButton(@"Previous");
+		_findNextButton                = OakCreateButton(@"Next");
+
+		_findAllButton.action          = @selector(findAll:);
+		replaceAllButton.action        = @selector(replaceAll:);
+		replaceButton.action           = @selector(replace:);
+		replaceAndFindButton.action    = @selector(replaceAndFind:);
+		findPreviousButton.action      = @selector(findPrevious:);
+		_findNextButton.action         = @selector(findNext:);
+
+		[replaceButton         bind:NSEnabledBinding toObject:_objectController            withKeyPath:@"content.canReplaceInDocument"  options:nil];
+		[replaceAndFindButton  bind:NSEnabledBinding toObject:_objectController            withKeyPath:@"content.canReplaceInDocument"  options:nil];
+		[replaceAndFindButton  bind:@"enabled2"      toObject:_findTextFieldViewController withKeyPath:@"stringValue.length"            options:nil];
+		[_findAllButton        bind:NSEnabledBinding toObject:_findTextFieldViewController withKeyPath:@"stringValue.length"            options:nil];
+		[replaceAllButton      bind:NSTitleBinding   toObject:_objectController            withKeyPath:@"content.replaceAllButtonTitle" options:nil];
+		[replaceAllButton      bind:NSEnabledBinding toObject:_findTextFieldViewController withKeyPath:@"stringValue.length"            options:nil];
+		[replaceAllButton      bind:@"enabled2"      toObject:_objectController            withKeyPath:@"content.canReplaceAll"         options:nil];
+		[findPreviousButton    bind:NSEnabledBinding toObject:_findTextFieldViewController withKeyPath:@"stringValue.length"            options:nil];
+		[_findNextButton       bind:NSEnabledBinding toObject:_findTextFieldViewController withKeyPath:@"stringValue.length"            options:nil];
+
+		_actionButtonsStackView = [NSStackView stackViewWithViews:@[ _findAllButton, replaceAllButton ]];
+		[_actionButtonsStackView setViews:@[ replaceButton, replaceAndFindButton, findPreviousButton, _findNextButton ] inGravity:NSStackViewGravityTrailing];
+		[_actionButtonsStackView setHuggingPriority:NSLayoutPriorityDefaultHigh-1 forOrientation:NSLayoutConstraintOrientationVertical];
+		_actionButtonsStackView.edgeInsets = { .left = 20, .right = 20 };
+
+		OakSetupKeyViewLoop(@[ _actionButtonsStackView, _findAllButton, replaceAllButton, replaceButton, replaceAndFindButton, findPreviousButton, _findNextButton ]);
+	}
+	return _actionButtonsStackView;
+}
+
+- (void)userDefaultsDidChange:(NSNotification*)aNotification
+{
+	self.ignoreCase = [NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsFindIgnoreCase];
+	self.wrapAround = [NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsFindWrapAround];
+
+	NSDictionary* options = [NSUserDefaults.standardUserDefaults dictionaryForKey:kUserDefaultsFolderOptionsKey];
+	self.searchHiddenFolders = [[options objectForKey:@"searchHiddenFolders"] boolValue];
+	self.searchFolderLinks   = [[options objectForKey:@"searchFolderLinks"] boolValue];
+	self.searchFileLinks     = ![[options objectForKey:@"skipFileLinks"] boolValue];
+	self.searchBinaryFiles   = [[options objectForKey:@"searchBinaryFiles"] boolValue];
+}
+
+- (void)findClipboardDidChange:(NSNotification*)aNotification
+{
+	OakPasteboardEntry* entry = OakPasteboard.findPasteboard.current;
+	_findTextFieldViewController.stringValue = entry.string;
+	self.regularExpression = entry.regularExpression;
+	self.ignoreWhitespace  = entry.ignoreWhitespace;
+	self.fullWords         = entry.fullWordMatch;
+}
+
+- (void)replaceClipboardDidChange:(NSNotification*)aNotification
+{
+	_replaceTextFieldViewController.stringValue = OakPasteboard.replacePasteboard.current.string;
+}
+
+- (NSString*)findString
+{
+	return _findTextFieldViewController.stringValue;
+}
+
+- (NSString*)replaceString
+{
+	return _replaceTextFieldViewController.stringValue ?: @"";
+}
+
+- (void)updateWindowTitle
+{
+	if(NSString* folder = self.searchFolder)
+		self.window.title = [NSString localizedStringWithFormat:@"Find — %@", [folder stringByAbbreviatingWithTildeInPath]];
+	else if(_searchTarget == FFSearchTargetOpenFiles)
+		self.window.title = @"Find — Open Files";
+	else
+		self.window.title = @"Find";
+}
+
+- (BOOL)isVisible
+{
+	return self.isWindowLoaded && self.window.isVisible;
+}
+
+- (void)showWindow:(id)sender
+{
+	BOOL isVisibleAndKey = self.isVisible && self.window.isKeyWindow;
+	[super showWindow:sender];
+	if(!isVisibleAndKey || ![self.window.firstResponder isKindOfClass:[NSTextView class]])
+		[self.window makeFirstResponder:_findTextFieldViewController.view];
+}
+
+- (BOOL)commitEditing
+{
+	id currentResponder = [[self window] firstResponder];
+	id view = [currentResponder isKindOfClass:[NSTextView class]] ? [currentResponder delegate] : currentResponder;
+	BOOL res = [_objectController commitEditing];
+	if([[self window] firstResponder] != currentResponder && view)
+		[[self window] makeFirstResponder:view];
+
+	// =====================
+	// = Update Pasteboard =
+	// =====================
+
+	if(OakNotEmptyString(self.findString))
+	{
+		OakPasteboardEntry* entry = OakPasteboard.findPasteboard.current;
+		BOOL newFindString        = ![self.findString isEqualToString:entry.string];
+		BOOL newRegularExpression = entry.regularExpression != self.regularExpression;
+		BOOL newIgnoreWhitespace  = entry.ignoreWhitespace  != self.ignoreWhitespace;
+		BOOL newFullWords         = entry.fullWordMatch     != self.fullWords;
+
+		if(newFindString || newRegularExpression || newIgnoreWhitespace || newFullWords)
+		{
+			NSDictionary* newOptions = @{
+				OakFindRegularExpressionOption: @(self.regularExpression),
+				OakFindIgnoreWhitespaceOption:  @(self.ignoreWhitespace),
+				OakFindFullWordsOption:         @(self.fullWords),
+			};
+			[OakPasteboard.findPasteboard addEntryWithString:self.findString options:newOptions];
+		}
+	}
+
+	if(self.replaceString && ![self.replaceString isEqualToString:OakPasteboard.findPasteboard.current.string])
+		[OakPasteboard.replacePasteboard addEntryWithString:self.replaceString];
+
+	return res;
+}
+
+- (void)resultsFrameDidChange:(NSNotification*)aNotification
+{
+	if(self.showsResultsOutlineView)
+		self.findResultsHeight = NSHeight(_resultsViewController.view.frame);
+}
+
+- (void)windowDidResignKey:(NSNotification*)aNotification
+{
+	[self commitEditing];
 }
 
 - (void)windowWillClose:(NSNotification*)aNotification
 {
 	[self stopSearch:self];
+	[self commitEditing];
 }
 
-// ====================================
-// = Actions for displaying the panel =
-// ====================================
-
-- (void)showWindow:(id)sender
+- (void)textViewWillPerformFindOperation:(NSNotification*)aNotification
 {
-	[self.windowController showWindow:self];
+	if([self isWindowLoaded] && [self.window isVisible] && [self.window isKeyWindow])
+		[self commitEditing];
 }
+
+// ==============================
+// = Create “where” pop-up menu =
+// ==============================
+
+- (NSString*)displayNameForFolder:(NSString*)path
+{
+	std::vector<std::string> paths;
+	for(NSUInteger i = 0; i < [self.recentFolders count]; ++i)
+		paths.push_back(to_s([self.recentFolders objectAtIndex:i]));
+	if(NSString* folder = self.searchFolder)
+		paths.push_back(to_s(folder));
+	paths.push_back(to_s(self.projectFolder));
+
+	auto it = std::find(paths.begin(), paths.end(), to_s(path));
+	if(it != paths.end())
+		return [NSString stringWithCxxString:path::display_name(*it, path::disambiguate(paths)[it - paths.begin()])];
+	return [NSFileManager.defaultManager displayNameAtPath:path];
+}
+
+- (void)updateSearchInPopUpMenu
+{
+	NSMenuItem* folderItem;
+
+	MBMenu const items = {
+		{ @"Document",            @selector(orderFrontFindPanel:),  @"f", .tag = FFSearchTargetDocument          },
+		{ @"Selection",           @selector(orderFrontFindPanel:),        .tag = FFSearchTargetSelection         },
+		{ /* -------- */ },
+		{ @"Open Files",          @selector(orderFrontFindPanel:),        .tag = FFSearchTargetOpenFiles         },
+		{ @"Project Folder",      @selector(orderFrontFindPanel:),  @"F", .tag = FFSearchTargetProject           },
+		{ @"File Browser Items",  @selector(orderFrontFindPanel:),        .tag = FFSearchTargetFileBrowserItems  },
+		{ @"Other Folder…",       @selector(showFolderSelectionPanel:),   .tag = FFSearchTargetOther             },
+		{ /* -------- */ },
+		{ @"«Last Folder»",       @selector(orderFrontFindPanel:),        .ref = &folderItem                     },
+		{ /* -------- */ },
+		{ @"Recent Places",       @selector(nop:),                                                               },
+	};
+
+	NSMenu* whereMenu = _wherePopUpButton.menu;
+	[whereMenu removeAllItems];
+	MBCreateMenu(items, whereMenu);
+
+	if(NSString* lastFolder = self.searchFolder ?: self.projectFolder)
+	{
+		[folderItem setTitle:[self displayNameForFolder:lastFolder]];
+		[folderItem setIconForFile:lastFolder];
+		[FFFolderMenu addSubmenuForDirectoryAtPath:lastFolder toMenuItem:folderItem];
+	}
+
+	if(_searchTarget == FFSearchTargetProject || _searchTarget == FFSearchTargetOther || (_searchTarget == FFSearchTargetFileBrowserItems && _fileBrowserItems.count == 1))
+			[_wherePopUpButton selectItem:folderItem];
+	else	[_wherePopUpButton selectItemWithTag:_searchTarget];
+
+	// =================
+	// = Recent Places =
+	// =================
+
+	NSInteger selectedIndex = -1;
+	NSMutableArray<NSString*>* recentPaths = [NSMutableArray array];
+	for(NSUInteger i = 0; i < _recentFolders.count; ++i)
+	{
+		NSString* path = [_recentFolders objectAtIndex:i];
+		if([path isEqualToString:_projectFolder] || ![NSFileManager.defaultManager fileExistsAtPath:path])
+			continue;
+
+		if(_searchTarget == FFSearchTargetOther && [path isEqualToString:_otherFolder])
+			selectedIndex = recentPaths.count;
+		[recentPaths addObject:path];
+	}
+
+	for(NSUInteger i = 0; i < recentPaths.count; ++i)
+	{
+		if(i == selectedIndex)
+			continue;
+
+		NSString* path = recentPaths[i];
+
+		NSMenuItem* recentItem = [whereMenu addItemWithTitle:[self displayNameForFolder:path] action:@selector(orderFrontFindPanel:) keyEquivalent:@""];
+		[recentItem setIconForFile:path];
+		[recentItem setRepresentedObject:path];
+
+		if(selectedIndex+1 == i)
+		{
+			recentItem.action        = @selector(goBack:);
+			recentItem.target        = self;
+			recentItem.keyEquivalent = @"[";
+			recentItem.keyEquivalentModifierMask = NSEventModifierFlagCommand;
+		}
+		else if(i+1 == selectedIndex)
+		{
+			recentItem.action        = @selector(goForward:);
+			recentItem.target        = self;
+			recentItem.keyEquivalent = @"]";
+			recentItem.keyEquivalentModifierMask = NSEventModifierFlagCommand;
+		}
+	}
+}
+
+- (void)setSearchTarget:(FFSearchTarget)newTarget
+{
+	_searchTarget = newTarget;
+
+	self.canEditGlob          = _searchTarget != FFSearchTargetDocument && _searchTarget != FFSearchTargetSelection;
+	self.canReplaceInDocument = _searchTarget == FFSearchTargetDocument || _searchTarget == FFSearchTargetSelection;
+
+	[self updateSearchInPopUpMenu];
+	[self updateWindowTitle];
+
+	BOOL isFolderSearch = _searchTarget != FFSearchTargetDocument && _searchTarget != FFSearchTargetSelection;
+	self.showsResultsOutlineView = isFolderSearch;
+}
+
+- (void)orderFrontFindPanel:(id)sender
+{
+	if([sender respondsToSelector:@selector(representedObject)])
+	{
+		if(NSString* folder = [sender representedObject])
+		{
+			self.otherFolder = folder;
+			self.searchTarget = FFSearchTargetOther;
+			return;
+		}
+	}
+
+	if([sender respondsToSelector:@selector(tag)])
+		self.searchTarget = FFSearchTarget([sender tag]);
+}
+
+// ==============================
+
+- (void)setShowsResultsOutlineView:(BOOL)flag
+{
+	if(_showsResultsOutlineView == flag)
+		return;
+
+	if(_showsResultsOutlineView = flag)
+	{
+		_resultsViewController.view.frame = { .size = NSMakeSize(NSWidth(_transitionViewController.view.frame), MAX(50, self.findResultsHeight)) };
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(resultsFrameDidChange:) name:NSViewFrameDidChangeNotification object:_resultsViewController.view];
+	}
+	else
+	{
+		[NSNotificationCenter.defaultCenter removeObserver:self name:NSViewFrameDidChangeNotification object:_resultsViewController.view];
+	}
+
+	_transitionViewController.subview = flag ? _resultsViewController.view : nil;
+	self.window.defaultButtonCell = flag ? _findAllButton.cell : _findNextButton.cell;
+}
+
+- (void)setStatusString:(NSString*)aString
+{
+	_statusBarViewController.statusText = aString;
+}
+
+- (void)setAlternateStatusString:(NSString*)aString
+{
+	_statusBarViewController.alternateStatusText = aString;
+}
+
+- (NSString*)searchFolder
+{
+	if(_searchTarget == FFSearchTargetProject)
+		return self.projectFolder;
+	else if(_searchTarget == FFSearchTargetFileBrowserItems && _fileBrowserItems.count == 1)
+		return _fileBrowserItems.firstObject;
+	else if(_searchTarget == FFSearchTargetOther)
+		return self.otherFolder;
+	return nil;
+}
+
+- (IBAction)goToParentFolder:(id)sender
+{
+	if(_searchTarget == FFSearchTargetFileBrowserItems && _fileBrowserItems.count > 1)
+	{
+		self.otherFolder = CommonAncestor(_fileBrowserItems);
+		self.searchTarget = FFSearchTargetOther;
+	}
+	else if(NSString* parent = [self.searchFolder stringByDeletingLastPathComponent])
+	{
+		self.otherFolder = parent;
+		self.searchTarget = FFSearchTargetOther;
+	}
+}
+
+- (void)setFindResultsHeight:(CGFloat)height { [NSUserDefaults.standardUserDefaults setInteger:height forKey:kUserDefaultsFindResultsHeightKey]; }
+- (CGFloat)findResultsHeight                 { return [NSUserDefaults.standardUserDefaults integerForKey:kUserDefaultsFindResultsHeightKey] ?: 200; }
+
+- (void)setRegularExpression:(BOOL)flag
+{
+	if(_regularExpression == flag)
+		return;
+
+	_regularExpression = flag;
+	[_findTextFieldViewController showPopoverWithString:nil];
+
+	_findTextFieldViewController.syntaxHighlightEnabled    = flag;
+	_replaceTextFieldViewController.syntaxHighlightEnabled = flag;
+}
+
+- (void)setIgnoreCase:(BOOL)flag        { if(_ignoreCase != flag) [NSUserDefaults.standardUserDefaults setObject:@(_ignoreCase = flag) forKey:kUserDefaultsFindIgnoreCase]; }
+- (void)setWrapAround:(BOOL)flag        { if(_wrapAround != flag) [NSUserDefaults.standardUserDefaults setObject:@(_wrapAround = flag) forKey:kUserDefaultsFindWrapAround]; }
+- (BOOL)ignoreWhitespace                { return _ignoreWhitespace && self.canIgnoreWhitespace; }
+- (BOOL)canIgnoreWhitespace             { return _regularExpression == NO; }
+
+- (NSString*)globString                 { [self commitEditing]; return _globHistoryList.head; }
+- (void)setGlobString:(NSString*)aGlob  { [_globHistoryList addObject:aGlob]; }
+
+- (void)setProjectFolder:(NSString*)aFolder
+{
+	if(_projectFolder != aFolder && ![_projectFolder isEqualToString:aFolder])
+	{
+		_projectFolder = aFolder ?: @"";
+		self.globHistoryList = [[OakHistoryList alloc] initWithName:[NSString stringWithFormat:@"Find in Folder Globs.%@", _projectFolder] stackSize:10 fallbackUserDefaultsKey:kUserDefaultsDefaultFindGlobsKey];
+		[self updateSearchInPopUpMenu];
+	}
+}
+
+- (void)updateFolderSearchUserDefaults
+{
+	NSMutableDictionary* options = [NSMutableDictionary dictionary];
+
+	if(self.searchHiddenFolders) options[@"searchHiddenFolders"] = @YES;
+	if(self.searchFolderLinks)   options[@"searchFolderLinks"]   = @YES;
+	if(!self.searchFileLinks)    options[@"skipFileLinks"]       = @YES;
+	if(self.searchBinaryFiles)   options[@"searchBinaryFiles"]   = @YES;
+
+	if([options count])
+			[NSUserDefaults.standardUserDefaults setObject:options forKey:kUserDefaultsFolderOptionsKey];
+	else	[NSUserDefaults.standardUserDefaults removeObjectForKey:kUserDefaultsFolderOptionsKey];
+}
+
+- (void)setSearchHiddenFolders:(BOOL)flag { if(_searchHiddenFolders != flag) { _searchHiddenFolders = flag; [self updateFolderSearchUserDefaults]; } }
+- (void)setSearchFolderLinks:(BOOL)flag   { if(_searchFolderLinks != flag)   { _searchFolderLinks   = flag; [self updateFolderSearchUserDefaults]; } }
+- (void)setSearchFileLinks:(BOOL)flag     { if(_searchFileLinks != flag)     { _searchFileLinks     = flag; [self updateFolderSearchUserDefaults]; } }
+- (void)setSearchBinaryFiles:(BOOL)flag   { if(_searchBinaryFiles != flag)   { _searchBinaryFiles   = flag; [self updateFolderSearchUserDefaults]; } }
+
+- (IBAction)toggleSearchHiddenFolders:(id)sender { self.searchHiddenFolders = !self.searchHiddenFolders; }
+- (IBAction)toggleSearchFolderLinks:(id)sender   { self.searchFolderLinks   = !self.searchFolderLinks;   }
+- (IBAction)toggleSearchFileLinks:(id)sender     { self.searchFileLinks     = !self.searchFileLinks;     }
+- (IBAction)toggleSearchBinaryFiles:(id)sender   { self.searchBinaryFiles   = !self.searchBinaryFiles;   }
+
+- (IBAction)takeLevelToFoldFrom:(id)sender       { [_resultsViewController toggleCollapsedState:sender];                    }
+- (IBAction)selectNextResult:(id)sender          { [_resultsViewController selectNextResultWrapAround:self.wrapAround];     }
+- (IBAction)selectPreviousResult:(id)sender      { [_resultsViewController selectPreviousResultWrapAround:self.wrapAround]; }
+- (IBAction)selectNextTab:(id)sender             { [_resultsViewController selectNextDocument:sender];                      }
+- (IBAction)selectPreviousTab:(id)sender         { [_resultsViewController selectPreviousDocument:sender];                  }
+
+// ========
+// = Find =
+// ========
 
 - (IBAction)showFolderSelectionPanel:(id)sender
 {
@@ -110,49 +794,67 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	openPanel.canChooseDirectories = YES;
 	if(NSString* folder = self.searchFolder)
 		openPanel.directoryURL = [NSURL fileURLWithPath:folder];
-	if([self.windowController isWindowLoaded] && [self.windowController.window isVisible])
+	if(self.isWindowLoaded && self.window.isVisible)
 	{
-		[openPanel beginSheetModalForWindow:self.windowController.window completionHandler:^(NSInteger result) {
-			if(result == NSFileHandlingPanelOKButton)
+		[openPanel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+			if(result == NSModalResponseOK)
 			{
-				self.windowController.otherFolder = [[[[openPanel URLs] lastObject] filePathURL] path];
-				self.windowController.searchTarget = FFSearchTargetOther;
+				self.otherFolder  = openPanel.URLs.lastObject.filePathURL.path;
+				self.searchTarget = FFSearchTargetOther;
 			}
-			else if([self isVisible]) // Reset selected item in pop-up button
-				self.windowController.searchTarget = self.windowController.searchTarget;
+			else if(self.window.isVisible) // Reset selected item in pop-up button
+			{
+				self.searchTarget = self.searchTarget;
+			}
 		}];
 	}
 	else
 	{
 		[openPanel beginWithCompletionHandler:^(NSInteger result) {
-			if(result == NSFileHandlingPanelOKButton)
+			if(result == NSModalResponseOK)
 			{
-				self.windowController.otherFolder = [[[[openPanel URLs] lastObject] filePathURL] path];
-				self.windowController.searchTarget = FFSearchTargetOther;
+				self.otherFolder  = openPanel.URLs.lastObject.filePathURL.path;
+				self.searchTarget = FFSearchTargetOther;
 				[self showWindow:self];
 			}
 		}];
 	}
 }
 
+- (void)goBack:(id)sender
+{
+	NSInteger index = [_wherePopUpButton.menu indexOfItemWithTarget:self andAction:_cmd];
+	if(index != -1)
+		[self orderFrontFindPanel:_wherePopUpButton.menu.itemArray[index]];
+}
+
+- (void)goForward:(id)sender
+{
+	NSInteger index = [_wherePopUpButton.menu indexOfItemWithTarget:self andAction:_cmd];
+	if(index != -1)
+		[self orderFrontFindPanel:_wherePopUpButton.menu.itemArray[index]];
+	else if(_searchTarget == FFSearchTargetOther && _otherFolder)
+		self.searchTarget = FFSearchTargetProject;
+}
+
 // ================
 // = Find actions =
 // ================
 
-+ (NSSet*)keyPathsForValuesAffectingCanReplaceAll         { return [NSSet setWithArray:@[ @"countOfMatches", @"countOfExcludedMatches", @"countOfReadOnlyMatches", @"countOfExcludedReadOnlyMatches", @"windowController.showsResultsOutlineView" ]]; }
-+ (NSSet*)keyPathsForValuesAffectingReplaceAllButtonTitle { return [NSSet setWithArray:@[ @"countOfMatches", @"countOfExcludedMatches", @"countOfReadOnlyMatches", @"countOfExcludedReadOnlyMatches", @"windowController.showsResultsOutlineView" ]]; }
++ (NSSet*)keyPathsForValuesAffectingCanReplaceAll         { return [NSSet setWithArray:@[ @"countOfMatches", @"countOfExcludedMatches", @"countOfReadOnlyMatches", @"countOfExcludedReadOnlyMatches", @"showsResultsOutlineView" ]]; }
++ (NSSet*)keyPathsForValuesAffectingReplaceAllButtonTitle { return [NSSet setWithArray:@[ @"countOfMatches", @"countOfExcludedMatches", @"countOfReadOnlyMatches", @"countOfExcludedReadOnlyMatches", @"showsResultsOutlineView" ]]; }
 
-- (BOOL)canReplaceAll                { return _windowController.showsResultsOutlineView ? (_countOfExcludedMatches - _countOfExcludedReadOnlyMatches < _countOfMatches - _countOfReadOnlyMatches) : YES; }
-- (NSString*)replaceAllButtonTitle   { return _windowController.showsResultsOutlineView && (_countOfExcludedMatches || _countOfReadOnlyMatches && _countOfReadOnlyMatches != _countOfMatches) ? @"Replace Selected" : @"Replace All"; }
+- (BOOL)canReplaceAll                { return _showsResultsOutlineView ? (_countOfExcludedMatches - _countOfExcludedReadOnlyMatches < _countOfMatches - _countOfReadOnlyMatches) : YES; }
+- (NSString*)replaceAllButtonTitle   { return _showsResultsOutlineView && (_countOfExcludedMatches || _countOfReadOnlyMatches && _countOfReadOnlyMatches != _countOfMatches) ? @"Replace Selected" : @"Replace All"; }
 
-- (IBAction)countOccurrences:(id)sender   { [self performFindAction:FindActionCountMatches   withWindowController:self.windowController]; }
-- (IBAction)findAll:(id)sender            { [self performFindAction:FindActionFindAll        withWindowController:self.windowController]; }
-- (IBAction)findAllInSelection:(id)sender { [self performFindAction:FindActionFindAll        withWindowController:self.windowController]; }
-- (IBAction)findNext:(id)sender           { [self performFindAction:FindActionFindNext       withWindowController:self.windowController]; }
-- (IBAction)findPrevious:(id)sender       { [self performFindAction:FindActionFindPrevious   withWindowController:self.windowController]; }
-- (IBAction)replaceAll:(id)sender         { [self performFindAction:FindActionReplaceAll     withWindowController:self.windowController]; }
-- (IBAction)replaceAndFind:(id)sender     { [self performFindAction:FindActionReplaceAndFind withWindowController:self.windowController]; }
-- (IBAction)replace:(id)sender            { [self performFindAction:FindActionReplace        withWindowController:self.windowController]; }
+- (IBAction)countOccurrences:(id)sender   { [self performFindAction:FindActionCountMatches];   }
+- (IBAction)findAll:(id)sender            { [self performFindAction:FindActionFindAll];        }
+- (IBAction)findAllInSelection:(id)sender { [self performFindAction:FindActionFindAll];        }
+- (IBAction)findNext:(id)sender           { [self performFindAction:FindActionFindNext];       }
+- (IBAction)findPrevious:(id)sender       { [self performFindAction:FindActionFindPrevious];   }
+- (IBAction)replaceAll:(id)sender         { [self performFindAction:FindActionReplaceAll];     }
+- (IBAction)replaceAndFind:(id)sender     { [self performFindAction:FindActionReplaceAndFind]; }
+- (IBAction)replace:(id)sender            { [self performFindAction:FindActionReplace];        }
 
 - (IBAction)stopSearch:(id)sender
 {
@@ -160,23 +862,29 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	{
 		[_documentSearch stop];
 		[self folderSearchDidFinish:nil];
-		self.windowController.statusString = @"Stopped.";
+		self.statusString = @"Stopped.";
 	}
 }
 
-- (void)performFindAction:(FindActionTag)action withWindowController:(FindWindowController*)controller
+- (void)performFindAction:(FindActionTag)action
 {
-	[controller updateFindErrorString];
-	if(controller.findErrorString != nil)
-		return;
+	if(self.regularExpression)
+	{
+		std::string error = regexp::validate(to_s(self.findString));
+		if(error != NULL_STR)
+		{
+			[_findTextFieldViewController showPopoverWithString:to_ns(text::format("Invalid regular expression: %s.", error.c_str()))];
+			return;
+		}
+	}
 
-	_findOptions = (controller.regularExpression ? find::regular_expression : find::none) | (controller.ignoreWhitespace ? find::ignore_whitespace : find::none) | (controller.fullWords ? find::full_words : find::none) | (controller.ignoreCase ? find::ignore_case : find::none) | (controller.wrapAround ? find::wrap_around : find::none);
+	_findOptions = (self.regularExpression ? find::regular_expression : find::none) | (self.ignoreWhitespace ? find::ignore_whitespace : find::none) | (self.fullWords ? find::full_words : find::none) | (self.ignoreCase ? find::ignore_case : find::none) | (self.wrapAround ? find::wrap_around : find::none);
 	if(action == FindActionFindPrevious)
 		_findOptions |= find::backwards;
 	else if(action == FindActionCountMatches || action == FindActionFindAll || action == FindActionReplaceAll)
 		_findOptions |= find::all_matches;
 
-	FFSearchTarget searchTarget = controller.searchTarget;
+	FFSearchTarget searchTarget = self.searchTarget;
 	if(searchTarget != FFSearchTargetSelection && (searchTarget != FFSearchTargetDocument || action == FindActionFindAll && self.documentIdentifier))
 	{
 		switch(action)
@@ -188,19 +896,19 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 					if(OakDocument* document = [OakDocumentController.sharedInstance findDocumentWithIdentifier:self.documentIdentifier])
 					{
 						self.documentSearch = nil;
-						self.windowController.showsResultsOutlineView              = YES;
-						self.windowController.resultsViewController.hideCheckBoxes = YES;
-						[self acceptMatches:[document matchesForString:controller.findString options:_findOptions]];
+						self.showsResultsOutlineView = YES;
+						_resultsViewController.hideCheckBoxes = YES;
+						[self acceptMatches:[document matchesForString:self.findString options:_findOptions]];
 						[self folderSearchDidFinish:nil];
 					}
 				}
 				else if(searchTarget == FFSearchTargetOpenFiles)
 				{
 					self.documentSearch = nil;
-					self.windowController.showsResultsOutlineView              = YES;
-					self.windowController.resultsViewController.hideCheckBoxes = NO;
+					self.showsResultsOutlineView = YES;
+					_resultsViewController.hideCheckBoxes = NO;
 					for(OakDocument* document in [OakDocumentController.sharedInstance openDocuments])
-						[self acceptMatches:[document matchesForString:controller.findString options:_findOptions]];
+						[self acceptMatches:[document matchesForString:self.findString options:_findOptions]];
 					[self folderSearchDidFinish:nil];
 				}
 				else
@@ -211,18 +919,22 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 					else if(searchTarget == FFSearchTargetFileBrowserItems)
 						paths = self.fileBrowserItems;
 					else // searchTarget == FFSearchTargetOther
-						paths = @[ _windowController.otherFolder ];
+						paths = @[ self.otherFolder ];
+
+					BOOL isDirectory = NO;
+					if((searchTarget == FFSearchTargetOther || searchTarget == FFSearchTargetFileBrowserItems) && paths.count == 1 && [NSFileManager.defaultManager fileExistsAtPath:paths.firstObject isDirectory:&isDirectory] && isDirectory)
+						[self.recentFolders addObject:paths.firstObject];
 
 					FFDocumentSearch* folderSearch = [FFDocumentSearch new];
 					folderSearch.searchBinaryFiles   = YES;
-					folderSearch.searchString        = controller.findString;
+					folderSearch.searchString        = self.findString;
 					folderSearch.options             = _findOptions;
 					folderSearch.paths               = paths;
-					folderSearch.glob                = controller.globString;
-					folderSearch.searchFolderLinks   = controller.searchFolderLinks;
-					folderSearch.searchFileLinks     = controller.searchFileLinks;
-					folderSearch.searchHiddenFolders = controller.searchHiddenFolders;
-					folderSearch.searchBinaryFiles   = controller.searchBinaryFiles;
+					folderSearch.glob                = self.globString;
+					folderSearch.searchFolderLinks   = self.searchFolderLinks;
+					folderSearch.searchFileLinks     = self.searchFileLinks;
+					folderSearch.searchHiddenFolders = self.searchHiddenFolders;
+					folderSearch.searchBinaryFiles   = self.searchBinaryFiles;
 
 					self.documentSearch = folderSearch;
 				}
@@ -233,7 +945,7 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 			case FindActionReplaceSelected:
 			{
 				NSUInteger replaceCount = 0, fileCount = 0;
-				std::string replaceString = to_s(controller.replaceString);
+				std::string replaceString = to_s(self.replaceString);
 
 				for(FFResultNode* parent in _results.children)
 				{
@@ -245,8 +957,8 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 					{
 						if(child.excluded)
 							continue;
-						child.replaceString = controller.replaceString;
-						replacements.emplace(std::make_pair(child.match.first, child.match.last), controller.regularExpression ? format_string::expand(replaceString, child.match.captures) : replaceString);
+						child.replaceString = self.replaceString;
+						replacements.emplace(std::make_pair(child.match.first, child.match.last), self.regularExpression ? format_string::expand(replaceString, child.match.captures) : replaceString);
 					}
 
 					if(OakDocument* doc = parent.document)
@@ -263,7 +975,7 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 								continue;
 							}
 
-							[doc saveModalForWindow:self.windowController.window completionHandler:^(OakDocumentIOResult result, NSString* errorMessage, oak::uuid_t const& filterUUID){
+							[doc saveModalForWindow:self.window completionHandler:^(OakDocumentIOResult result, NSString* errorMessage, oak::uuid_t const& filterUUID){
 								// TODO Indicate failure when result != OakDocumentIOResultSuccess
 								if(!doc.isLoaded) // Ensure document is still closed
 									doc.content = nil;
@@ -275,12 +987,12 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 						++fileCount;
 					}
 				}
-				self.windowController.statusString = [NSString stringWithFormat:MSG_REPLACE_ALL_RESULTS, [NSNumberFormatter localizedStringFromNumber:@(replaceCount) numberStyle:NSNumberFormatterDecimalStyle], [NSNumberFormatter localizedStringFromNumber:@(fileCount) numberStyle:NSNumberFormatterDecimalStyle]];
+				self.statusString = [NSString stringWithFormat:@"%@ replacement%@ made across %@ file%@.", [NSNumberFormatter localizedStringFromNumber:@(replaceCount) numberStyle:NSNumberFormatterDecimalStyle], replaceCount == 1 ? @"" : @"s", [NSNumberFormatter localizedStringFromNumber:@(fileCount) numberStyle:NSNumberFormatterDecimalStyle], fileCount == 1 ? @"" : @"s"];
 			}
 			break;
 
-			case FindActionFindNext:     [self.windowController selectNextResult:self];     break;
-			case FindActionFindPrevious: [self.windowController selectPreviousResult:self]; break;
+			case FindActionFindNext:     [self selectNextResult:self];     break;
+			case FindActionFindPrevious: [self selectPreviousResult:self]; break;
 		}
 	}
 	else
@@ -298,13 +1010,10 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 		}
 
 		self.closeWindowOnSuccess = action == FindActionFindNext && [[NSApp currentEvent] type] == NSEventTypeKeyDown && to_s([NSApp currentEvent]) == utf8::to_s(NSCarriageReturnCharacter);
-		[OakPasteboard pasteboardWithName:NSFindPboard].auxiliaryOptionsForCurrent = nil;
+		self.findMatches = nil;
 		[NSApp sendAction:@selector(performFindOperation:) to:nil from:self];
 	}
 }
-
-- (NSString*)findString    { return self.windowController.findString    ?: @""; }
-- (NSString*)replaceString { return self.windowController.replaceString ?: @""; }
 
 - (void)didFind:(NSUInteger)aNumber occurrencesOf:(NSString*)aFindString atPosition:(text::pos_t const&)aPosition wrapped:(BOOL)didWrap
 {
@@ -314,43 +1023,31 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	};
 
 	std::map<std::string, std::string> variables;
-	variables["count"]  = std::to_string(aNumber);
+	variables["count"]  = to_s([NSNumberFormatter localizedStringFromNumber:@(aNumber) numberStyle:NSNumberFormatterDecimalStyle]);
 	variables["found"]  = to_s(aFindString);
 	variables["line"]   = aPosition ? std::to_string(aPosition.line + 1)   : NULL_STR;
 	variables["column"] = aPosition ? std::to_string(aPosition.column + 1) : NULL_STR;
-	self.windowController.statusString = [NSString stringWithCxxString:format_string::expand(formatStrings[(_findOptions & find::regular_expression) ? 1 : 0][std::min<size_t>(aNumber, 2)], variables)];
+	NSString* statusString = [NSString stringWithCxxString:format_string::expand(formatStrings[(_findOptions & find::regular_expression) ? 1 : 0][std::min<size_t>(aNumber, 2)], variables)];
+	self.statusString = statusString;
 
 	NSResponder* keyView = [[NSApp keyWindow] firstResponder];
 	id element = [keyView respondsToSelector:@selector(cell)] ? [keyView performSelector:@selector(cell)] : keyView;
 	if([element respondsToSelector:@selector(isAccessibilityElement)] && [element isAccessibilityElement])
-		NSAccessibilityPostNotificationWithUserInfo(element, NSAccessibilityAnnouncementRequestedNotification, @{ NSAccessibilityAnnouncementKey: self.windowController.statusString });
+		NSAccessibilityPostNotificationWithUserInfo(element, NSAccessibilityAnnouncementRequestedNotification, @{ NSAccessibilityAnnouncementKey: statusString });
 
 	if(self.closeWindowOnSuccess && aNumber != 0)
-		return [self.windowController close];
+		return [self close];
 }
 
 - (void)didReplace:(NSUInteger)aNumber occurrencesOf:(NSString*)aFindString with:(NSString*)aReplacementString
 {
 	static NSString* const formatStrings[2][3] = {
-		{ @"Nothing replaced (no occurrences of “%@”).", @"Replaced one occurrence of “%@”.", @"Replaced %2$ld occurrences of “%@”." },
-		{ @"Nothing replaced (no matches for “%@”).",    @"Replaced one match of “%@”.",      @"Replaced %2$ld matches of “%@”."     }
+		{ @"Nothing replaced (no occurrences of “%@”).", @"Replaced one occurrence of “%@”.", @"Replaced %2$@ occurrences of “%@”." },
+		{ @"Nothing replaced (no matches for “%@”).",    @"Replaced one match of “%@”.",      @"Replaced %2$@ matches of “%@”."     }
 	};
 	NSString* format = formatStrings[(_findOptions & find::regular_expression) ? 1 : 0][aNumber > 2 ? 2 : aNumber];
-	self.windowController.statusString = [NSString stringWithFormat:format, aFindString, aNumber];
+	self.statusString = [NSString stringWithFormat:format, aFindString, [NSNumberFormatter localizedStringFromNumber:@(aNumber) numberStyle:NSNumberFormatterDecimalStyle]];
 }
-
-// =============
-// = Accessors =
-// =============
-
-- (void)setSearchTarget:(FFSearchTarget)newTarget { self.windowController.searchTarget = newTarget; }
-- (FFSearchTarget)searchTarget                    { return self.windowController.searchTarget; }
-- (void)setProjectFolder:(NSString*)folder        { self.windowController.projectFolder = folder; }
-- (NSString*)projectFolder                        { return self.windowController.projectFolder; }
-- (void)setFileBrowserItems:(NSArray*)items       { self.windowController.fileBrowserItems = items; }
-- (NSArray*)fileBrowserItems                      { return self.windowController.fileBrowserItems; }
-- (NSString*)searchFolder                         { return self.windowController.searchFolder; }
-- (BOOL)isVisible                                 { return self.windowController.window.isVisible; }
 
 // ===========
 // = Options =
@@ -363,17 +1060,17 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	find::options_t option = find::options_t([sender tag]);
 	switch(option)
 	{
-		case find::full_words:         self.windowController.fullWords         = !self.windowController.fullWords;         break;
-		case find::ignore_case:        self.windowController.ignoreCase        = !self.windowController.ignoreCase;        break;
-		case find::ignore_whitespace:  self.windowController.ignoreWhitespace  = !self.windowController.ignoreWhitespace;  break;
-		case find::regular_expression: self.windowController.regularExpression = !self.windowController.regularExpression; break;
-		case find::wrap_around:        self.windowController.wrapAround        = !self.windowController.wrapAround;        break;
+		case find::full_words:         self.fullWords         = !self.fullWords;         break;
+		case find::ignore_case:        self.ignoreCase        = !self.ignoreCase;        break;
+		case find::ignore_whitespace:  self.ignoreWhitespace  = !self.ignoreWhitespace;  break;
+		case find::regular_expression: self.regularExpression = !self.regularExpression; break;
+		case find::wrap_around:        self.wrapAround        = !self.wrapAround;        break;
 		default:
 			ASSERTF(false, "Unknown find option tag %d\n", option);
 	}
 
-	if([[[[OakPasteboard pasteboardWithName:NSFindPboard] current] string] isEqualToString:self.windowController.findString])
-		[self.windowController commitEditing]; // update the options on the pasteboard immediately if the find string has not been changed
+	if([OakPasteboard.findPasteboard.current.string isEqualToString:self.findString])
+		[self commitEditing]; // update the options on the pasteboard immediately if the find string has not been changed
 }
 
 // ====================
@@ -396,8 +1093,7 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 		self.countOfMatches = self.countOfExcludedMatches = self.countOfReadOnlyMatches = self.countOfExcludedReadOnlyMatches = 0;
 	}
 
-	_windowController.resultsViewController.results = _results = [FFResultNode new];
-	_resultsDelegate = self.delegate;
+	_resultsViewController.results = _results = [FFResultNode new];
 }
 
 - (void)setDocumentSearch:(FFDocumentSearch*)newSearcher
@@ -407,20 +1103,20 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	if(_documentSearch)
 	{
 		[_documentSearch removeObserver:self forKeyPath:@"currentPath"];
-		[[NSNotificationCenter defaultCenter] removeObserver:self name:FFDocumentSearchDidReceiveResultsNotification object:_documentSearch];
-		[[NSNotificationCenter defaultCenter] removeObserver:self name:FFDocumentSearchDidFinishNotification object:_documentSearch];
+		[NSNotificationCenter.defaultCenter removeObserver:self name:FFDocumentSearchDidReceiveResultsNotification object:_documentSearch];
+		[NSNotificationCenter.defaultCenter removeObserver:self name:FFDocumentSearchDidFinishNotification object:_documentSearch];
 		[_documentSearch stop];
 	}
 
 	if(_documentSearch = newSearcher)
 	{
-		self.windowController.busy                    = YES;
-		self.windowController.statusString            = MSG_SEARCHING_FMT;
-		self.windowController.showsResultsOutlineView = YES;
-		self.windowController.resultsViewController.hideCheckBoxes = NO;
+		_statusBarViewController.progressIndicatorVisible = YES;
+		self.statusString            = @"Searching…";
+		self.showsResultsOutlineView = YES;
+		_resultsViewController.hideCheckBoxes = NO;
 
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(folderSearchDidReceiveResults:) name:FFDocumentSearchDidReceiveResultsNotification object:_documentSearch];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(folderSearchDidFinish:) name:FFDocumentSearchDidFinishNotification object:_documentSearch];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(folderSearchDidReceiveResults:) name:FFDocumentSearchDidReceiveResultsNotification object:_documentSearch];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(folderSearchDidFinish:) name:FFDocumentSearchDidFinishNotification object:_documentSearch];
 		[_documentSearch addObserver:self forKeyPath:@"currentPath" options:(NSKeyValueObservingOptionNew|NSKeyValueObservingOptionOld) context:NULL];
 		self.performingFolderSearch = YES;
 		[_documentSearch start];
@@ -442,7 +1138,7 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 		[parent addResultNode:node];
 	}
 
-	[_windowController.resultsViewController insertItemsAtIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(countOfExistingItems, _results.children.count - countOfExistingItems)]];
+	[_resultsViewController insertItemsAtIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(countOfExistingItems, _results.children.count - countOfExistingItems)]];
 }
 
 - (void)folderSearchDidReceiveResults:(NSNotification*)aNotification
@@ -450,24 +1146,18 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	[self acceptMatches:[aNotification userInfo][@"matches"]];
 }
 
-- (void)addResultsToPasteboard:(id)sender
+- (void)setUpFindMatches:(id)sender
 {
-	NSMutableArray* documents = [NSMutableArray array];
+	NSMutableArray* findMatches = [NSMutableArray array];
 	for(FFResultNode* parent in _results.children)
-	{
-		[documents addObject:@{
-			@"identifier":      parent.firstResultNode.document.identifier.UUIDString,
-			@"firstMatchRange": [NSString stringWithCxxString:parent.firstResultNode.match.range],
-			@"lastMatchRange":  [NSString stringWithCxxString:parent.lastResultNode.match.range],
-		}];
-	}
-	[OakPasteboard pasteboardWithName:NSFindPboard].auxiliaryOptionsForCurrent = @{ @"documents": documents };
+		[findMatches addObject:[[FindMatch alloc] initWithUUID:parent.firstResultNode.document.identifier firstRange:parent.firstResultNode.match.range lastRange:parent.lastResultNode.match.range]];
+	self.findMatches = findMatches;
 }
 
 - (void)folderSearchDidFinish:(NSNotification*)aNotification
 {
 	self.performingFolderSearch = NO;
-	self.windowController.busy = NO;
+	_statusBarViewController.progressIndicatorVisible = NO;
 	if(!_results)
 		return;
 
@@ -476,17 +1166,17 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	[self bind:@"countOfReadOnlyMatches" toObject:_results withKeyPath:@"countOfReadOnly" options:nil];
 	[self bind:@"countOfExcludedReadOnlyMatches" toObject:_results withKeyPath:@"countOfExcludedReadOnly" options:nil];
 
-	[self addResultsToPasteboard:self];
+	[self setUpFindMatches:self];
 
-	NSString* fmt = MSG_ZERO_MATCHES_FMT;
+	NSString* fmt;
 	switch(self.countOfMatches)
 	{
-		case 0:  fmt = MSG_ZERO_MATCHES_FMT;     break;
-		case 1:  fmt = MSG_ONE_MATCH_FMT;        break;
-		default: fmt = MSG_MULTIPLE_MATCHES_FMT; break;
+		case 0:  fmt = @"No results found for “%@”.";     break;
+		case 1:  fmt = @"Found one result for “%@”.";     break;
+		default: fmt = @"Found %2$@ results for “%1$@”."; break;
 	}
 
-	NSString* searchString = [_documentSearch searchString] ?: self.windowController.findString;
+	NSString* searchString = [_documentSearch searchString] ?: self.findString;
 	NSString* msg = [NSString stringWithFormat:fmt, searchString, [NSNumberFormatter localizedStringFromNumber:@(self.countOfMatches) numberStyle:NSNumberFormatterDecimalStyle]];
 	if(_documentSearch)
 	{
@@ -495,18 +1185,19 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 		formatter.maximumFractionDigits = 1;
 		NSString* seconds = [formatter stringFromNumber:@([_documentSearch searchDuration])];
 
-		self.windowController.statusString          = [msg stringByAppendingFormat:([_documentSearch scannedFileCount] == 1 ? MSG_SEARCHED_FILES_ONE : MSG_SEARCHED_FILES_MULTIPLE), seconds, [NSNumberFormatter localizedStringFromNumber:@([_documentSearch scannedFileCount]) numberStyle:NSNumberFormatterDecimalStyle]];
-		self.windowController.alternateStatusString = [msg stringByAppendingFormat:MSG_SEARCHED_BYTES, seconds, [NSString stringWithCxxString:text::format_size([_documentSearch scannedByteCount])]];
+		self.statusString          = [msg stringByAppendingFormat:([_documentSearch scannedFileCount] == 1 ? @" (searched one file in %@ seconds)" : @" (searched %2$@ files in %1$@ seconds)"), seconds, [NSNumberFormatter localizedStringFromNumber:@([_documentSearch scannedFileCount]) numberStyle:NSNumberFormatterDecimalStyle]];
+		self.alternateStatusString = [msg stringByAppendingFormat:@" (searched %2$@ in %1$@ seconds)", seconds, [NSByteCountFormatter stringFromByteCount:_documentSearch.scannedByteCount countStyle:NSByteCountFormatterCountStyleFile]];
 	}
 	else
 	{
-		self.windowController.statusString = msg;
+		self.statusString = msg;
 	}
 
-	__weak __block id observerId = [[NSNotificationCenter defaultCenter] addObserverForName:OakPasteboardDidChangeNotification object:[OakPasteboard pasteboardWithName:NSFindPboard] queue:nil usingBlock:^(NSNotification*){
+	__weak __block id token = [NSNotificationCenter.defaultCenter addObserverForName:OakPasteboardDidChangeNotification object:OakPasteboard.findPasteboard queue:nil usingBlock:^(NSNotification*){
+		self.findMatches = nil;
 		for(FFResultNode* parent in _results.children)
 			[parent.document removeAllMarksOfType:kSearchMarkIdentifier];
-		[[NSNotificationCenter defaultCenter] removeObserver:observerId];
+		[NSNotificationCenter.defaultCenter removeObserver:token];
 	}];
 }
 
@@ -526,7 +1217,7 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 		if(path::is_directory(searchPath))
 			relative += "/";
 
-		self.windowController.statusString = [NSString localizedStringWithFormat:MSG_SEARCHING_FOLDER_FMT, [NSString stringWithCxxString:relative]];
+		self.statusString = [NSString localizedStringWithFormat:@"Searching “%@”…", [NSString stringWithCxxString:relative]];
 	}
 }
 
@@ -545,15 +1236,15 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 		captures[to_ns(pair.first)] = to_ns(pair.second);
 	doc.matchCaptures = [captures copy];
 
-	[_resultsDelegate selectRange:item.match.range inDocument:doc];
+	[_delegate selectRange:item.match.range inDocument:doc];
 }
 
 - (void)didDoubleClickResult:(FFResultNode*)item
 {
-	if([[[NSUserDefaults standardUserDefaults] objectForKey:kUserDefaultsKeepSearchResultsOnDoubleClick] boolValue])
+	if([[NSUserDefaults.standardUserDefaults objectForKey:kUserDefaultsKeepSearchResultsOnDoubleClick] boolValue])
 		return;
-	[_resultsDelegate bringToFront];
-	[self.windowController close];
+	[_delegate bringToFront];
+	[self close];
 }
 
 - (void)didRemoveResult:(FFResultNode*)item
@@ -563,22 +1254,22 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 		if(item.document.path)
 		{
 			std::string path = path::relative_to(to_s(item.document.path), to_s(CommonAncestor(_documentSearch.paths)));
-			NSString* newGlob = [_windowController.globString stringByAppendingFormat:@"~%@", [NSString stringWithCxxString:path]];
-			_windowController.globString = newGlob;
+			NSString* newGlob = [self.globString stringByAppendingFormat:@"~%@", [NSString stringWithCxxString:path]];
+			self.globString = newGlob;
 		}
 	}
 
 	[item.document removeAllMarksOfType:kSearchMarkIdentifier];
-	[self addResultsToPasteboard:self];
+	[self setUpFindMatches:self];
 
-	NSString* fmt = MSG_SHOWING_ZERO_MATCHES_FMT;
+	NSString* fmt;
 	switch(self.countOfMatches)
 	{
-		case 0:  fmt = MSG_SHOWING_ZERO_MATCHES_FMT;     break;
-		case 1:  fmt = MSG_SHOWING_ONE_MATCH_FMT;        break;
-		default: fmt = MSG_SHOWING_MULTIPLE_MATCHES_FMT; break;
+		case 0:  fmt = @"No results for “%@”.";             break;
+		case 1:  fmt = @"Showing one result for “%@”.";     break;
+		default: fmt = @"Showing %2$@ results for “%1$@”."; break;
 	}
-	_windowController.statusString = [NSString stringWithFormat:fmt, [_documentSearch searchString], [NSNumberFormatter localizedStringFromNumber:@(self.countOfMatches) numberStyle:NSNumberFormatterDecimalStyle]];
+	self.statusString = [NSString stringWithFormat:fmt, [_documentSearch searchString], [NSNumberFormatter localizedStringFromNumber:@(self.countOfMatches) numberStyle:NSNumberFormatterDecimalStyle]];
 }
 
 // =====================
@@ -589,7 +1280,7 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 {
 	FFResultNode* item = [sender representedObject];
 	if([item isKindOfClass:[FFResultNode class]])
-		[_windowController.resultsViewController showResultNode:item.firstResultNode];
+		[_resultsViewController showResultNode:item.firstResultNode];
 }
 
 - (void)updateShowTabMenu:(NSMenu*)aMenu
@@ -622,22 +1313,22 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 {
 	NSMutableArray* array = [NSMutableArray array];
 
-	std::string const replacementString = to_s(_windowController.replaceString);
-	for(FFResultNode* item in _windowController.resultsViewController.selectedResults)
+	std::string const replacementString = to_s(self.replaceString);
+	for(FFResultNode* item in _resultsViewController.selectedResults)
 	{
 		auto const& captures = item.match.captures;
-		[array addObject:captures.empty() ? _windowController.replaceString : to_ns(format_string::expand(replacementString, captures))];
+		[array addObject:captures.empty() ? self.replaceString : to_ns(format_string::expand(replacementString, captures))];
 	}
 
 	[NSPasteboard.generalPasteboard clearContents];
-	[NSPasteboard.generalPasteboard writeObjects:array];
+	[NSPasteboard.generalPasteboard writeObjects:@[ [array componentsJoinedByString:@"\n"] ]];
 }
 
 - (void)copyEntireLines:(BOOL)entireLines withFilename:(BOOL)withFilename
 {
 	NSMutableArray* array = [NSMutableArray array];
 
-	for(FFResultNode* item in _windowController.resultsViewController.selectedResults)
+	for(FFResultNode* item in _resultsViewController.selectedResults)
 	{
 		OakDocumentMatch* m = item.match;
 		std::string str = to_s(m.excerpt);
@@ -654,7 +1345,7 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	}
 
 	[NSPasteboard.generalPasteboard clearContents];
-	[NSPasteboard.generalPasteboard writeObjects:array];
+	[NSPasteboard.generalPasteboard writeObjects:@[ [array componentsJoinedByString:@"\n"] ]];
 }
 
 - (void)copy:(id)sender                          { [self copyEntireLines:YES withFilename:NO ]; }
@@ -684,13 +1375,28 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 
 - (BOOL)validateMenuItem:(NSMenuItem*)aMenuItem
 {
+	BOOL res = YES;
 	static std::set<SEL> const copyActions = { @selector(copy:), @selector(copyReplacements:), @selector(copyMatchingParts:), @selector(copyMatchingPartsWithFilename:), @selector(copyEntireLines:), @selector(copyEntireLinesWithFilename:) };
 	if(copyActions.find(aMenuItem.action) != copyActions.end())
-		return [_results countOfLeafs] != 0;
+		res = _results.countOfLeafs != 0;
 	else if(aMenuItem.action == @selector(checkAll:))
-		return _countOfExcludedMatches > _countOfExcludedReadOnlyMatches;
+		res = _countOfExcludedMatches > _countOfExcludedReadOnlyMatches;
 	else if(aMenuItem.action == @selector(uncheckAll:) )
-		return _countOfExcludedMatches - _countOfExcludedReadOnlyMatches < _countOfMatches - _countOfReadOnlyMatches;
-	return YES;
+		res = _countOfExcludedMatches - _countOfExcludedReadOnlyMatches < _countOfMatches - _countOfReadOnlyMatches;
+	else if(aMenuItem.action == @selector(toggleSearchHiddenFolders:))
+		aMenuItem.state = self.searchHiddenFolders ? NSControlStateValueOn : NSControlStateValueOff;
+	else if(aMenuItem.action == @selector(toggleSearchFolderLinks:))
+		aMenuItem.state = self.searchFolderLinks ? NSControlStateValueOn : NSControlStateValueOff;
+	else if(aMenuItem.action == @selector(toggleSearchFileLinks:))
+		aMenuItem.state = self.searchFileLinks ? NSControlStateValueOn : NSControlStateValueOff;
+	else if(aMenuItem.action == @selector(toggleSearchBinaryFiles:))
+		aMenuItem.state = self.searchBinaryFiles ? NSControlStateValueOn : NSControlStateValueOff;
+	else if(aMenuItem.action == @selector(goToParentFolder:))
+		res = self.searchFolder != nil || _searchTarget == FFSearchTargetFileBrowserItems && CommonAncestor(_fileBrowserItems);
+	else if(aMenuItem.action == @selector(goBack:))
+		res = [_wherePopUpButton.menu indexOfItemWithTarget:self andAction:aMenuItem.action] != -1;
+	else if(aMenuItem.action == @selector(goForward:))
+		res = [_wherePopUpButton.menu indexOfItemWithTarget:self andAction:aMenuItem.action] != -1 || _searchTarget == FFSearchTargetOther && _otherFolder;
+	return res;
 }
 @end

@@ -28,7 +28,7 @@ static NSString* const kRecordingPlaceholderString = @"…";
 
 - (NSSize)intrinsicContentSize
 {
-	return NSMakeSize(NSViewNoInstrinsicMetric, 22);
+	return NSMakeSize(NSViewNoIntrinsicMetric, 22);
 }
 
 - (CGFloat)baselineOffsetFromBottom
@@ -86,10 +86,11 @@ static NSString* const kRecordingPlaceholderString = @"…";
 			_clearButton.target = self;
 			_clearButton.action = @selector(clearKeyEquivalent:);
 
-			NSDictionary* views = @{ @"clear": _clearButton };
-			OakAddAutoLayoutViewsToSuperview([views allValues], self);
-			[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(>=4)-[clear]-(4)-|" options:0 metrics:nil views:views]];
-			[self addConstraint:[NSLayoutConstraint constraintWithItem:_clearButton attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual toItem:self attribute:NSLayoutAttributeCenterY multiplier:1 constant:0]];
+			_clearButton.translatesAutoresizingMaskIntoConstraints = NO;
+			[self addSubview:_clearButton];
+
+			[_clearButton.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-4].active = YES;
+			[_clearButton.centerYAnchor constraintEqualToAnchor:self.centerYAnchor].active = YES;
 		}
 		_clearButton.hidden = NO;
 		[_clearButton updateTrackingAreas];
@@ -201,12 +202,20 @@ static NSString* const kRecordingPlaceholderString = @"…";
 {
 	NSRect frame = [self bounds];
 
-	[[NSColor lightGrayColor] set];
-	NSFrameRect(frame);
+	NSColor* frameColor      = NSColor.lightGrayColor;
+	NSColor* backgroundColor = NSColor.whiteColor;
 
 	if(@available(macos 10.14, *))
-		[[NSColor controlColor] set];
-	else	[[NSColor whiteColor] set];
+	{
+		if([[NSApp.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] isEqualToString:NSAppearanceNameDarkAqua])
+			frameColor = NSColor.tertiaryLabelColor;
+		backgroundColor = NSColor.controlColor;
+	}
+
+	[frameColor set];
+	NSFrameRect(frame);
+
+	[backgroundColor set];
 	NSRectFill(NSIntersectionRect(aRect, NSInsetRect(frame, 1, 1)));
 
 	NSDictionary* stringAttributes = @{

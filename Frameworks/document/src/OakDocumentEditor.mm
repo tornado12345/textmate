@@ -25,12 +25,12 @@ static int32_t const NSWrapColumnWindowWidth = 0;
 // ====================================
 
 @implementation OakDocumentEditor
-+ (instancetype)documentEditorWithDocument:(OakDocument*)aDocument fontScaleFactor:(CGFloat)scale
++ (instancetype)documentEditorWithDocument:(OakDocument*)aDocument fontScaleFactor:(CGFloat)scale themeUUID:(NSString*)themeUUID
 {
-	return [[OakDocumentEditor alloc] initWithDocument:aDocument fontScaleFactor:scale];
+	return [[OakDocumentEditor alloc] initWithDocument:aDocument fontScaleFactor:scale themeUUID:themeUUID];
 }
 
-- (instancetype)initWithDocument:(OakDocument*)aDocument fontScaleFactor:(CGFloat)scale
+- (instancetype)initWithDocument:(OakDocument*)aDocument fontScaleFactor:(CGFloat)scale themeUUID:(NSString*)themeUUID
 {
 	if(self = [self init])
 	{
@@ -43,9 +43,9 @@ static int32_t const NSWrapColumnWindowWidth = 0;
 		[_document loadModalForWindow:nil completionHandler:nil];
 
 		_editor = std::make_unique<ng::editor_t>([_document buffer]);
-		_editor->set_clipboard(get_clipboard(NSGeneralPboard));
-		_editor->set_find_clipboard(get_clipboard(NSFindPboard));
-		_editor->set_replace_clipboard(get_clipboard(OakReplacePboard));
+		_editor->set_clipboard(get_clipboard(OakPasteboard.generalPasteboard));
+		_editor->set_find_clipboard(get_clipboard(OakPasteboard.findPasteboard));
+		_editor->set_replace_clipboard(get_clipboard(OakPasteboard.replacePasteboard));
 
 		settings_t const settings = settings_for_path(to_s(_document.virtualPath ?: _document.path), to_s(_document.fileType), to_s(_document.directory ?: [_document.path stringByDeletingLastPathComponent]));
 		std::string const invisibles_map = settings.get(kSettingsInvisiblesMapKey, "");
@@ -58,7 +58,7 @@ static int32_t const NSWrapColumnWindowWidth = 0;
 		bool softWrap     = settings.get(kSettingsSoftWrapKey, false);
 		size_t wrapColumn = settings.get(kSettingsWrapColumnKey, NSWrapColumnWindowWidth);
 
-		theme_ptr theme = parse_theme(bundles::lookup(settings.get(kSettingsThemeKey, NULL_STR)));
+		theme_ptr theme = parse_theme(bundles::lookup(to_s(themeUUID)));
 		_layout = std::make_unique<ng::layout_t>([_document buffer], theme, to_s(_font.fontName), _font.pointSize * _fontScaleFactor, softWrap, scrollPastEnd, wrapColumn, to_s(_document.folded));
 
 		if(settings.get(kSettingsShowWrapColumnKey, false))

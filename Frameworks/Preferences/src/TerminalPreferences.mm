@@ -5,11 +5,11 @@
 #import <OakAppKit/NSMenu Additions.h>
 #import <OakFoundation/NSString Additions.h>
 #import <OakFoundation/OakStringListTransformer.h>
+#import <SoftwareUpdate/SoftwareUpdate.h> // OakCompareVersionStrings()
 #import <io/path.h>
 #import <io/exec.h>
 #import <ns/ns.h>
 #import <regexp/format_string.h>
-#import <version/version.h>
 #import <bundles/bundles.h>
 #import <oak/compat.h>
 
@@ -172,8 +172,8 @@ static bool uninstall_mate (std::string const& path)
 {
 	NSSavePanel* savePanel = [NSSavePanel savePanel];
 	[savePanel setNameFieldStringValue:@"mate"];
-	[savePanel beginSheetModalForWindow:[self view].window completionHandler:^(NSInteger result) {
-		if(result == NSFileHandlingPanelOKButton)
+	[savePanel beginSheetModalForWindow:[self view].window completionHandler:^(NSModalResponse result) {
+		if(result == NSModalResponseOK)
 				[self updatePopUp:[[savePanel.URL filePathURL] path]];
 		else	[installPathPopUp selectItemAtIndex:0];
 		[self updateUI:self];
@@ -192,6 +192,9 @@ static bool uninstall_mate (std::string const& path)
 	[menu addItemWithTitle:@"~/bin/mate" action:@selector(updateUI:) keyEquivalent:@""];
 	[menu addItem:[NSMenuItem separatorItem]];
 	[menu addItemWithTitle:@"Other…" action:@selector(selectInstallPath:) keyEquivalent:@""];
+
+	for(NSMenuItem* menuItem in menu.itemArray)
+		menuItem.target = self;
 
 	if(path)
 		[installPathPopUp selectItemWithTitle:path];
@@ -212,7 +215,7 @@ static bool uninstall_mate (std::string const& path)
 
 	[installPathPopUp setEnabled:isInstalled ? NO : YES];
 	[installButton setAction:isInstalled ? @selector(performUninstallMate:) : @selector(performInstallMate:)];
-	[installButton setState:isInstalled ? NSOnState : NSOffState];
+	[installButton setState:isInstalled ? NSControlStateValueOn : NSControlStateValueOff];
 }
 
 - (void)loadView
@@ -223,12 +226,13 @@ static bool uninstall_mate (std::string const& path)
 	{
 		if(access([path fileSystemRepresentation], F_OK) != 0)
 		{
-			[[NSUserDefaults standardUserDefaults] removeObjectForKey:kUserDefaultsMateInstallPathKey];
-			[[NSUserDefaults standardUserDefaults] removeObjectForKey:kUserDefaultsMateInstallVersionKey];
+			[NSUserDefaults.standardUserDefaults removeObjectForKey:kUserDefaultsMateInstallPathKey];
+			[NSUserDefaults.standardUserDefaults removeObjectForKey:kUserDefaultsMateInstallVersionKey];
 		}
 	}
 
 	installPathPopUp.target = self;
+	installButton.target = self;
 	statusTextFormat  = to_s([installStatusText stringValue]);
 	summaryTextFormat = to_s([installSummaryText stringValue]);
 	[self updatePopUp:self.mateInstallPath];
@@ -238,17 +242,22 @@ static bool uninstall_mate (std::string const& path)
 	LSSetDefaultHandlerForURLScheme(CFSTR("txmt"), CFBundleGetIdentifier(CFBundleGetMainBundle()));
 }
 
+- (NSSize)preferredContentSize
+{
+	return self.view.frame.size;
+}
+
 - (NSString*)mateInstallPath
 {
-	NSString* path = [[NSUserDefaults standardUserDefaults] stringForKey:kUserDefaultsMateInstallPathKey];
+	NSString* path = [NSUserDefaults.standardUserDefaults stringForKey:kUserDefaultsMateInstallPathKey];
 	return [path stringByExpandingTildeInPath];
 }
 
 - (void)setMateInstallPath:(NSString*)aPath
 {
 	if(aPath)
-			[[NSUserDefaults standardUserDefaults] setObject:aPath forKey:kUserDefaultsMateInstallPathKey];
-	else	[[NSUserDefaults standardUserDefaults] removeObjectForKey:kUserDefaultsMateInstallPathKey];
+			[NSUserDefaults.standardUserDefaults setObject:aPath forKey:kUserDefaultsMateInstallPathKey];
+	else	[NSUserDefaults.standardUserDefaults removeObjectForKey:kUserDefaultsMateInstallPathKey];
 }
 
 - (void)installMateAs:(NSString*)dstPath
@@ -260,7 +269,7 @@ static bool uninstall_mate (std::string const& path)
 			[self setMateInstallPath:dstPath];
 			std::string res = io::exec(to_s(srcPath), "--version", NULL);
 			if(regexp::match_t const& m = regexp::search("\\Amate ([\\d.]+)", res))
-				[[NSUserDefaults standardUserDefaults] setObject:[NSString stringWithCxxString:m[1]] forKey:kUserDefaultsMateInstallVersionKey];
+				[NSUserDefaults.standardUserDefaults setObject:[NSString stringWithCxxString:m[1]] forKey:kUserDefaultsMateInstallVersionKey];
 		}
 	}
 	else
@@ -297,7 +306,7 @@ static bool uninstall_mate (std::string const& path)
 		[alert setMessageText:@"File Already Exists"];
 		[alert setInformativeText:[NSString stringWithCxxString:summary]];
 		[alert addButtons:@"Replace", @"Cancel", nil];
-		[alert beginSheetModalForWindow:[self.view window] completionHandler:^(NSInteger returnCode){
+		[alert beginSheetModalForWindow:[self.view window] completionHandler:^(NSModalResponse returnCode){
 			if(returnCode == NSAlertFirstButtonReturn)
 				[self installMateAs:[[installPathPopUp titleOfSelectedItem] stringByExpandingTildeInPath]];
 		}];
@@ -318,8 +327,8 @@ static bool uninstall_mate (std::string const& path)
 
 + (void)updateMateIfRequired
 {
-	NSString* oldMate    = [[[NSUserDefaults standardUserDefaults] stringForKey:kUserDefaultsMateInstallPathKey] stringByExpandingTildeInPath];
-	NSString* oldVersion = [[NSUserDefaults standardUserDefaults] stringForKey:kUserDefaultsMateInstallVersionKey];
+	NSString* oldMate    = [[NSUserDefaults.standardUserDefaults stringForKey:kUserDefaultsMateInstallPathKey] stringByExpandingTildeInPath];
+	NSString* oldVersion = [NSUserDefaults.standardUserDefaults stringForKey:kUserDefaultsMateInstallVersionKey];
 	NSString* newMate    = [[NSBundle mainBundle] pathForResource:@"mate" ofType:nil];
 
 	if(oldMate && newMate)
@@ -329,7 +338,7 @@ static bool uninstall_mate (std::string const& path)
 			if(regexp::match_t const& m = regexp::search("\\Amate ([\\d.]+)", res))
 			{
 				NSString* newVersion = [NSString stringWithCxxString:m[1]];
-				if(version::less(to_s(oldVersion), to_s(newVersion)))
+				if(OakCompareVersionStrings(oldVersion, newVersion) == NSOrderedAscending)
 				{
 					if(cp_requires_admin(to_s(oldMate)))
 					{
@@ -345,13 +354,13 @@ static bool uninstall_mate (std::string const& path)
 							}
 
 							// Avoid asking again by storing the new version number
-							[[NSUserDefaults standardUserDefaults] setObject:newVersion forKey:kUserDefaultsMateInstallVersionKey];
+							[NSUserDefaults.standardUserDefaults setObject:newVersion forKey:kUserDefaultsMateInstallVersionKey];
 						});
 					}
 					else
 					{
 						if(install_mate(to_s(newMate), to_s(oldMate)))
-							[[NSUserDefaults standardUserDefaults] setObject:newVersion forKey:kUserDefaultsMateInstallVersionKey];
+							[NSUserDefaults.standardUserDefaults setObject:newVersion forKey:kUserDefaultsMateInstallVersionKey];
 					}
 				}
 			}

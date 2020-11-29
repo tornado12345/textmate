@@ -13,8 +13,6 @@
 #include <command/parser.h>
 #include <oak/debug.h>
 
-OAK_DEBUG_VAR(File_Save);
-
 namespace
 {
 	struct file_context_t : file::save_context_t
@@ -23,7 +21,6 @@ namespace
 
 		~file_context_t ()
 		{
-			D(DBF_File_Save, bug("\n"););
 			if(_state != kStateDone)
 			{
 				ASSERT(!_saved);
@@ -46,7 +43,6 @@ namespace
 
 		void proceed ()
 		{
-			D(DBF_File_Save, bug("state %d\n", _state););
 			_state = _next_state;
 			event_loop();
 		}
@@ -119,19 +115,27 @@ namespace
 					chmod(path.c_str(), sbuf.st_mode | S_IWUSR);
 			}
 
-			path::intermediate_t dest(path);
+			static std::map<std::string, path::atomic_t> const map = {
+				{ "always",          path::atomic_t::always           },
+				{ "externalVolumes", path::atomic_t::external_volumes },
+				{ "remoteVolumes",   path::atomic_t::remote_volumes   },
+				{ "never",           path::atomic_t::never            },
+				{ "legacy",          path::atomic_t::legacy           },
+			};
 
-			int fd = open(dest, O_CREAT|O_TRUNC|O_WRONLY|O_CLOEXEC, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH);
+			settings_t const settings = settings_for_path(path);
+			std::string const atomicSaveSetting = settings.get(kSettingsAtomicSaveKey, "always");
+			auto it = map.find(atomicSaveSetting);
+			path::atomic_t atomicSave = it != map.end() ? it->second : path::atomic_t::always;
+
+			path::intermediate_t dest(path, atomicSave);
+
+			int fd = dest.open(&error);
 			if(fd == -1)
-				error = text::format("open(\"%s\"): %s", (char const*)dest, strerror(errno));
+				;
 			else if(write(fd, bytes->get(), bytes->size()) != bytes->size())
-			{
 				error = text::format("write: %s", strerror(errno));
-				close(fd);
-			}
-			else if(close(fd) != 0)
-				error = text::format("close: %s", strerror(errno));
-			else if(!dest.commit(&error))
+			else if(!dest.close(&error))
 				;
 			else if(!path::set_attributes(path, attributes))
 				error = text::format("Setting extended attributes");

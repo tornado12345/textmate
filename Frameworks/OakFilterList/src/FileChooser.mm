@@ -199,21 +199,24 @@ static NSDictionary* globs_for_path (std::string const& path)
 		{ kSettingsIncludeKey,                         kSearchGlobsKey                 },
 	};
 
-	NSDictionary* res = @{
-		kSearchExcludeDirectoryGlobsKey: [NSMutableArray array],
-		kSearchExcludeFileGlobsKey:      [NSMutableArray array],
-		kSearchExcludeGlobsKey:          [NSMutableArray array],
-		kSearchDirectoryGlobsKey:        [NSMutableArray array],
-		kSearchFileGlobsKey:             [NSMutableArray array],
-		kSearchGlobsKey:                 [NSMutableArray array],
-	};
+	NSMutableDictionary* res = [NSMutableDictionary dictionary];
 
 	settings_t const settings = settings_for_path(NULL_STR, "", path);
 	for(auto const& pair : map)
 	{
 		if(NSString* glob = to_ns(settings.get(pair.first)))
+		{
+			if(!res[pair.second])
+				res[pair.second] = [NSMutableArray array];
 			[res[pair.second] addObject:glob];
+		}
 	}
+
+	if(!res[kSearchDirectoryGlobsKey] && !res[kSearchGlobsKey])
+		res[kSearchDirectoryGlobsKey] = @[ @"*" ];
+	if(!res[kSearchFileGlobsKey] && !res[kSearchGlobsKey])
+		res[kSearchFileGlobsKey] = @[ @"*" ];
+
 	return res;
 }
 
@@ -232,6 +235,7 @@ static NSDictionary* globs_for_path (std::string const& path)
 	NSUInteger _lastSearchToken;
 	NSMutableArray<OakDocument*>* _searchResults;
 }
+@property (nonatomic) OakScopeBarViewController* scopeBar;
 @property (nonatomic) NSArray* sourceListLabels;
 @property (nonatomic) NSProgressIndicator* progressIndicator;
 
@@ -256,13 +260,13 @@ static NSDictionary* globs_for_path (std::string const& path)
 		self.tableView.allowsMultipleSelection = YES;
 		self.tableView.rowHeight = 38;
 
-		OakScopeBarView* scopeBar = [OakScopeBarView new];
-		scopeBar.labels = self.sourceListLabels;
+		_scopeBar = [[OakScopeBarViewController alloc] init];
+		_scopeBar.labels = self.sourceListLabels;
 
 		NSDictionary* titlebarViews = @{
 			@"searchField": self.searchField,
-			@"dividerView": [self makeDividerView],
-			@"scopeBar":    scopeBar,
+			@"dividerView": OakCreateNSBoxSeparator(),
+			@"scopeBar":    _scopeBar.view,
 		};
 
 		NSView* titlebarView = [[NSView alloc] initWithFrame:NSZeroRect];
@@ -276,12 +280,12 @@ static NSDictionary* globs_for_path (std::string const& path)
 		[self addTitlebarAccessoryView:titlebarView];
 
 		_progressIndicator = [[NSProgressIndicator alloc] initWithFrame:NSZeroRect];
-		_progressIndicator.style                = NSProgressIndicatorSpinningStyle;
+		_progressIndicator.style                = NSProgressIndicatorStyleSpinning;
 		_progressIndicator.controlSize          = NSControlSizeSmall;
 		_progressIndicator.displayedWhenStopped = NO;
 
 		NSDictionary* footerViews = @{
-			@"dividerView":        [self makeDividerView],
+			@"dividerView":        OakCreateNSBoxSeparator(),
 			@"statusTextField":    self.statusTextField,
 			@"itemCountTextField": self.itemCountTextField,
 			@"progressIndicator":  _progressIndicator,
@@ -296,17 +300,19 @@ static NSDictionary* globs_for_path (std::string const& path)
 
 		[self updateScrollViewInsets];
 
-		OakSetupKeyViewLoop(@[ self.searchField, scopeBar ]);
+		OakSetupKeyViewLoop(@[ self.searchField, _scopeBar.view ]);
+		self.window.initialFirstResponder = self.searchField;
 
-		self.sourceIndex = [[NSUserDefaults standardUserDefaults] integerForKey:kUserDefaultsFileChooserSourceIndexKey];
+		self.sourceIndex = [NSUserDefaults.standardUserDefaults integerForKey:kUserDefaultsFileChooserSourceIndexKey];
 		[self updateWindowTitle];
-		[scopeBar bind:NSValueBinding toObject:self withKeyPath:@"sourceIndex" options:nil];
+		[_scopeBar bind:NSValueBinding toObject:self withKeyPath:@"sourceIndex" options:nil];
 	}
 	return self;
 }
 
-- (IBAction)selectNextTab:(id)sender     { self.sourceIndex = (self.sourceIndex + 1) % self.sourceListLabels.count; }
-- (IBAction)selectPreviousTab:(id)sender { self.sourceIndex = (self.sourceIndex + self.sourceListLabels.count - 1) % self.sourceListLabels.count; }
+- (IBAction)selectNextTab:(id)sender     { [_scopeBar selectNextButton:sender]; }
+- (IBAction)selectPreviousTab:(id)sender { [_scopeBar selectPreviousButton:sender]; }
+- (void)updateShowTabMenu:(NSMenu*)aMenu { [_scopeBar updateGoToMenu:aMenu];}
 
 - (void)showWindow:(id)sender
 {
@@ -342,12 +348,6 @@ static NSDictionary* globs_for_path (std::string const& path)
 	[self reload];
 }
 
-- (void)takeSourceIndexFrom:(id)sender
-{
-	if([sender respondsToSelector:@selector(tag)])
-		self.sourceIndex = [sender tag];
-}
-
 - (void)setSourceIndex:(NSUInteger)newIndex
 {
 	if(_sourceIndex != newIndex)
@@ -357,8 +357,8 @@ static NSDictionary* globs_for_path (std::string const& path)
 		[self reload];
 
 		if(_sourceIndex == 0)
-				[[NSUserDefaults standardUserDefaults] removeObjectForKey:kUserDefaultsFileChooserSourceIndexKey];
-		else	[[NSUserDefaults standardUserDefaults] setObject:@(_sourceIndex) forKey:kUserDefaultsFileChooserSourceIndexKey];
+				[NSUserDefaults.standardUserDefaults removeObjectForKey:kUserDefaultsFileChooserSourceIndexKey];
+		else	[NSUserDefaults.standardUserDefaults setObject:@(_sourceIndex) forKey:kUserDefaultsFileChooserSourceIndexKey];
 	}
 }
 
@@ -695,27 +695,11 @@ static NSDictionary* globs_for_path (std::string const& path)
 	self.path = [_path stringByDeletingLastPathComponent];
 }
 
-- (void)updateShowTabMenu:(NSMenu*)aMenu
-{
-	if(self.window.isKeyWindow)
-	{
-		[[aMenu addItemWithTitle:@"All" action:@selector(takeSourceIndexFrom:) keyEquivalent:@"1"] setTag:kFileChooserAllSourceIndex];
-		[[aMenu addItemWithTitle:@"Open Documents" action:@selector(takeSourceIndexFrom:) keyEquivalent:@"2"] setTag:kFileChooserOpenDocumentsSourceIndex];
-		[[aMenu addItemWithTitle:@"Uncommitted Documents" action:@selector(takeSourceIndexFrom:) keyEquivalent:@"3"] setTag:kFileChooserUncommittedChangesSourceIndex];
-	}
-	else
-	{
-		[aMenu addItemWithTitle:@"No Sources" action:@selector(nop:) keyEquivalent:@""];
-	}
-}
-
 - (BOOL)validateMenuItem:(NSMenuItem*)item
 {
 	BOOL activate = YES;
 	if([item action] == @selector(goToParentFolder:))
 		activate = _sourceIndex == kFileChooserAllSourceIndex && to_s(_path) != path::parent(to_s(_path));
-	else if([item action] == @selector(takeSourceIndexFrom:))
-		[item setState:[item tag] == self.sourceIndex ? NSOnState : NSOffState];
 	return activate;
 }
 @end

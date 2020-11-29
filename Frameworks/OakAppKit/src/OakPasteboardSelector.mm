@@ -5,7 +5,7 @@
 */
 
 #import "OakPasteboardSelector.h"
-#import <OakAppKit/OakAppKit.h>
+#import "OakAppKit.h"
 #import <ns/ns.h>
 #import <oak/oak.h>
 #import <oak/debug.h>
@@ -34,7 +34,7 @@ static size_t line_count (std::string const& text)
 
 - (NSDictionary*)textAttributes
 {
-	static NSMutableParagraphStyle* const style = [[NSParagraphStyle defaultParagraphStyle] mutableCopy];
+	static NSMutableParagraphStyle* const style = [NSParagraphStyle.defaultParagraphStyle mutableCopy];
 	[style setLineBreakMode:NSLineBreakByTruncatingTail];
 	if([self isHighlighted])
 	{
@@ -92,7 +92,7 @@ static size_t line_count (std::string const& text)
 
 - (size_t)lineCountForText:(NSString*)text
 {
-	return oak::cap<size_t>(1, line_count(to_s(text)), _maxLines);
+	return std::clamp<size_t>(line_count(to_s(text)), 1, _maxLines);
 }
 
 - (void)drawWithFrame:(NSRect)frame inView:(NSView*)controlView
@@ -136,6 +136,7 @@ static size_t line_count (std::string const& text)
 }
 - (void)setTableView:(NSTableView*)aTableView;
 @property (nonatomic) BOOL shouldClose;
+@property (nonatomic) BOOL shouldCancel;
 @end
 
 @implementation OakPasteboardSelectorTableViewHelper
@@ -207,18 +208,18 @@ static size_t line_count (std::string const& text)
 
 - (void)deleteBackward:(id)sender
 {
-	int selectedRow = [tableView selectedRow];
+	NSInteger selectedRow = [tableView selectedRow];
 	if(selectedRow == -1 || [entries count] <= 1)
 		return NSBeep();
 	[entries removeObjectAtIndex:selectedRow];
 	[tableView reloadData];
 	if([entries count] > 0)
-		[tableView selectRowIndexes:[NSIndexSet indexSetWithIndex:oak::cap(0, selectedRow - 1, (int)[entries count]-1)] byExtendingSelection:NO];
+		[tableView selectRowIndexes:[NSIndexSet indexSetWithIndex:std::clamp<NSInteger>(selectedRow - 1, 0, [entries count]-1)] byExtendingSelection:NO];
 }
 
 - (void)deleteForward:(id)sender
 {
-	int selectedRow = [tableView selectedRow];
+	NSInteger selectedRow = [tableView selectedRow];
 	if(selectedRow == -1 || [entries count] <= 1)
 		return NSBeep();
 	[entries removeObjectAtIndex:selectedRow];
@@ -234,7 +235,8 @@ static size_t line_count (std::string const& text)
 
 - (void)cancel:(id)sender
 {
-	_shouldClose = YES;
+	_shouldCancel = YES;
+	_shouldClose  = YES;
 }
 
 - (void)doCommandBySelector:(SEL)aSelector
@@ -266,6 +268,12 @@ static size_t line_count (std::string const& text)
 - (NSArray*)entries
 {
 	return entries;
+}
+@end
+
+@interface OakPasteboardSelector ()
+{
+	OakPasteboardSelectorTableViewHelper* tableViewHelper;
 }
 @end
 
@@ -329,7 +337,7 @@ static size_t line_count (std::string const& text)
 	[parentWindow removeChildWindow:window];
 	[window orderOut:self];
 
-	return [tableView selectedRow];
+	return tableViewHelper.shouldCancel ? -1 : [tableView selectedRow];
 }
 
 - (void)setWidth:(CGFloat)width;

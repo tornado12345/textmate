@@ -248,7 +248,7 @@ namespace bundles
 			auto bundles = query(kFieldName, require._name, scope::wildcard, kItemTypeBundle, require._uuid);
 			if(bundles.size() == 1)
 					base[format_string::expand("TM_${name/.*/\\U${0/[^a-zA-Z]+/_/g}/}_BUNDLE_SUPPORT", std::map<std::string, std::string>{ { "name", require._name } })] = (bundles.back())->support_path();
-			else	fprintf(stderr, "*** %s: unable to find required bundle: %s / %s\n", name_with_bundle().c_str(), require._name.c_str(), to_s(require._uuid).c_str());
+			else	os_log_error(OS_LOG_DEFAULT, "%{public}s: unable to find required bundle: %{public}s / %{public}s", name_with_bundle().c_str(), require._name.c_str(), to_s(require._uuid).c_str());
 		}
 
 		return base;
@@ -300,7 +300,7 @@ namespace bundles
 		return it == _fields.end() ? fallback : it->second;
 	}
 
-	bool item_t::does_match (std::string const& field, std::string const& value, scope::context_t const& scope, int kind, oak::uuid_t const& bundle, double* rank)
+	std::optional<double> item_t::does_match (std::string const& field, std::string const& value, scope::context_t const& scope, int kind, oak::uuid_t const& bundle)
 	{
 		bool match = true;
 		if(field != kFieldAny)
@@ -310,10 +310,9 @@ namespace bundles
 				match = match || pair->second == value || (field == kFieldSemanticClass && pair->second.size() > value.size() && pair->second.find(value) == 0 && pair->second[value.size()] == '.');
 		}
 
-		match = match && (scope == scope::wildcard || _scope_selector.does_match(scope, rank));
 		match = match && (_kind & kind) == _kind;
 		match = match && (!bundle || bundle == bundle_uuid());
-		return match;
+		return match ? (scope == scope::wildcard ? 1 : _scope_selector.does_match(scope)) : std::optional<double>();
 	}
 
 	plist::dictionary_t erase_false_values (plist::dictionary_t const& plist)
@@ -408,7 +407,7 @@ namespace bundles
 		}
 
 		if(!plist::save(destPath, newPlist, plist::kPlistFormatXML))
-			return fprintf(stderr, "failed to save ‘%s’\n", destPath.c_str()), false;
+			return os_log_error(OS_LOG_DEFAULT, "Failed to save ‘%{public}s’", destPath.c_str()), false;
 
 		if(!_local)
 		{
@@ -426,7 +425,7 @@ namespace bundles
 	{
 		std::string const path = _kind == kItemTypeBundle ? path::join(folder, "info.plist") : path_for_kind(folder, name(), _kind);
 		if(!plist::save(path, erase_false_values(plist()), plist::kPlistFormatXML))
-			return fprintf(stderr, "failed to save ‘%s’\n", path.c_str()), false;
+			return os_log_error(OS_LOG_DEFAULT, "Failed to save ‘%{public}s’", path.c_str()), false;
 		return true;
 	}
 

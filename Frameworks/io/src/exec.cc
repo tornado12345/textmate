@@ -3,10 +3,7 @@
 #include "pipe.h"
 #include <text/format.h>
 #include <oak/datatypes.h>
-#include <oak/debug/OakDebugLog.h>
 #include <crash/info.h>
-
-OAK_DEBUG_VAR(IO_Exec);
 
 namespace io
 {
@@ -128,16 +125,15 @@ namespace io
 			if(waitpid(process.pid, &status, 0) != process.pid)
 				perror("io::vexec: waitpid");
 			else if(!WIFEXITED(status))
-				fprintf(stderr, "*** abnormal exit (%d) from ‘%s’\n", status, text::join(command, " ").c_str());
+				os_log_error(OS_LOG_DEFAULT, "Abnormal exit (%d) from ‘%{public}s’", status, text::join(command, " ").c_str());
 			else if(WEXITSTATUS(status) != 0)
-				fprintf(stderr, "*** exit code %d from ‘%s’\n", WEXITSTATUS(status), text::join(command, " ").c_str());
+				os_log_error(OS_LOG_DEFAULT, "Exit code %d from ‘%{public}s’", WEXITSTATUS(status), text::join(command, " ").c_str());
 			else
 				success = true;
 		});
 
 		dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
 		dispatch_release(group);
-		D(DBF_IO_Exec, if(!error.empty()) bug("error from command: “%s”\n", error.c_str()););
 		return success ? output : NULL_STR;
 	}
 

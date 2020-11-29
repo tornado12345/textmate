@@ -23,8 +23,6 @@
 #import <settings/settings.h>
 #import <oak/debug.h>
 
-OAK_DEBUG_VAR(BundleEditor);
-
 @class OakCommand;
 
 @interface BundleEditor () <OakTextViewDelegate>
@@ -129,7 +127,7 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 		NSInteger row = [aBrowser selectedRowInColumn:col];
 		if(row == -1)
 		{
-			fprintf(stderr, "*** abort\n");
+			os_log_error(OS_LOG_DEFAULT, "*** abort");
 			return be::entry_ptr();
 		}
 		entry = entry->children()[row];
@@ -148,8 +146,6 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 {
 	if(self = [super initWithWindowNibName:@"BundleEditor"])
 	{
-		D(DBF_BundleEditor, bug("\n"););
-
 		struct callback_t : bundles::callback_t
 		{
 			callback_t (BundleEditor* self) : self(self) { }
@@ -242,7 +238,7 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 - (void)createItemOfType:(bundles::kind_t)aType
 {
 	NSString* path = [[NSBundle bundleForClass:[self class]] pathForResource:info_for(aType).file ofType:@"plist"];
-	if(!path || ![[NSFileManager defaultManager] fileExistsAtPath:path])
+	if(!path || ![NSFileManager.defaultManager fileExistsAtPath:path])
 		return;
 
 	NSInteger row = [browser selectedRowInColumn:0];
@@ -286,7 +282,7 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 	[typeChooser setMenu:menu];
 	[typeChooser sizeToFit];
 	[alert setAccessoryView:typeChooser];
-	[alert beginSheetModalForWindow:self.window completionHandler:^(NSInteger returnCode){
+	[alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse returnCode){
 		if(returnCode == NSAlertFirstButtonReturn)
 			[self createItemOfType:(bundles::kind_t)[[(NSPopUpButton*)[alert accessoryView] selectedItem] tag]];
 	}];
@@ -329,7 +325,7 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 			std::string itemFolder = path::parent(trashedItem->paths().front());
 			if(trashedItem->kind() == bundles::kItemTypeBundle && trashedItem->paths().size() == 1)
 				itemFolder = path::parent(itemFolder);
-			[[BundlesManager sharedInstance] reloadPath:[NSString stringWithCxxString:itemFolder]];
+			[BundlesManager.sharedInstance reloadPath:[NSString stringWithCxxString:itemFolder]];
 		}
 	}
 }
@@ -399,7 +395,7 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 		if(!success)
 		{
 			NSAlert* alert = [NSAlert tmAlertWithMessageText:@"Error Parsing Property List" informativeText:@"The property list is not valid.\n\nUnfortunately I am presently unable to point to where the parser failed." buttons:@"OK", nil];
-			[alert beginSheetModalForWindow:self.window completionHandler:^(NSInteger returnCode){ }];
+			[alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse returnCode){ }];
 			return NO;
 		}
 	}
@@ -462,7 +458,7 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 		item->set_plist(pair.second);
 		if(item->save())
 		{
-			[[BundlesManager sharedInstance] reloadPath:[NSString stringWithCxxString:item->paths().front()]];
+			[BundlesManager.sharedInstance reloadPath:[NSString stringWithCxxString:item->paths().front()]];
 		}
 		else
 		{
@@ -474,7 +470,7 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 	if(!changes.empty())
 	{
 		NSAlert* alert = [NSAlert tmAlertWithMessageText:@"Error Saving Bundle Item" informativeText:@"Sorry, but something went wrong while trying to save your changes. More info may be available via the console." buttons:@"OK", nil];
-		[alert beginSheetModalForWindow:self.window completionHandler:^(NSInteger returnCode){
+		[alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse returnCode){
 			if(returnCode == NSAlertSecondButtonReturn) // Discard Changes
 			{
 				changes.clear();
@@ -580,8 +576,8 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 
 - (void)copyUUID:(NSMenuItem*)sender
 {
-	[[NSPasteboard generalPasteboard] declareTypes:@[ NSStringPboardType ] owner:nil];
-	[[NSPasteboard generalPasteboard] setString:[sender representedObject] forType:NSStringPboardType];
+	[[NSPasteboard generalPasteboard] declareTypes:@[ NSPasteboardTypeString ] owner:nil];
+	[[NSPasteboard generalPasteboard] setString:[sender representedObject] forType:NSPasteboardTypeString];
 }
 
 - (void)exportBundle:(id)sender
@@ -595,14 +591,14 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 
 		NSSavePanel* savePanel = [NSSavePanel savePanel];
 		[savePanel setNameFieldStringValue:[NSString stringWithCxxString:name + ".tmbundle"]];
-		[savePanel beginSheetModalForWindow:self.window completionHandler:^(NSInteger result) {
-			if(result == NSFileHandlingPanelOKButton)
+		[savePanel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+			if(result == NSModalResponseOK)
 			{
 				NSString* path = [[savePanel.URL filePathURL] path];
-				if([[NSFileManager defaultManager] fileExistsAtPath:path])
+				if([NSFileManager.defaultManager fileExistsAtPath:path])
 				{
 					NSError* error;
-					if(![[NSFileManager defaultManager] removeItemAtPath:path error:&error])
+					if(![NSFileManager.defaultManager removeItemAtPath:path error:&error])
 					{
 						[self.window presentError:error];
 						return;
@@ -632,7 +628,7 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 	if(![sender respondsToSelector:@selector(representedObject)])
 		return;
 	if(NSString* path = [sender representedObject])
-		[[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:path] ]];
+		[NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:path] ]];
 }
 
 // ====================
@@ -763,7 +759,7 @@ static NSMutableDictionary* DictionaryForPropertyList (plist::dictionary_t const
 	{
 		NSMenuItem* item = [self createMenuItemForCxxPath:path];
 		item.title = [[NSString stringWithCxxString:path] stringByAbbreviatingWithTildeInPath];
-		item.state = NSOffState;
+		item.state = NSControlStateValueOff;
 		[menu addItem:item];
 	}
 	return YES;
@@ -798,7 +794,7 @@ static NSMutableDictionary* DictionaryForPropertyList (plist::dictionary_t const
 	else
 	{
 		self.window.representedFilename = NSHomeDirectory();
-		[self.window standardWindowButton:NSWindowDocumentIconButton].image = [[NSWorkspace sharedWorkspace] iconForFileType:[NSString stringWithCxxString:info.file_type]];
+		[self.window standardWindowButton:NSWindowDocumentIconButton].image = [NSWorkspace.sharedWorkspace iconForFileType:[NSString stringWithCxxString:info.file_type]];
 	}
 
 	plist::dictionary_t const& plist = it != changes.end() ? it->second : bundleItem->plist();
@@ -912,7 +908,7 @@ static NSString* DescriptionForChanges (std::map<bundles::item_ptr, plist::dicti
 	[alert setMessageText:DescriptionForChanges(changes)];
 	[alert setInformativeText:@"Your changes will be lost if you don’t save them."];
 	[alert addButtons:@"Save", @"Cancel", @"Don’t Save", nil];
-	[alert beginSheetModalForWindow:self.window completionHandler:^(NSInteger returnCode){
+	[alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse returnCode){
 		if(returnCode != NSAlertSecondButtonReturn) // Not "Cancel"
 		{
 			if(returnCode == NSAlertFirstButtonReturn) // "Save"

@@ -1,5 +1,6 @@
 #import "ProjectLayoutView.h"
 #import <OakAppKit/OakUIConstructionFunctions.h>
+#import <OakFoundation/OakFoundation.h>
 #import <Preferences/Keys.h>
 #import <oak/misc.h>
 #import <oak/debug.h>
@@ -7,7 +8,7 @@
 NSString* const kUserDefaultsFileBrowserWidthKey = @"fileBrowserWidth";
 NSString* const kUserDefaultsHTMLOutputSizeKey   = @"htmlOutputSize";
 
-@interface ProjectLayoutView ()
+@interface ProjectLayoutView () <OakUserDefaultsObserver>
 @property (nonatomic) NSView* fileBrowserDivider;
 @property (nonatomic) NSView* htmlOutputDivider;
 @property (nonatomic) NSLayoutConstraint* fileBrowserWidthConstraint;
@@ -16,10 +17,10 @@ NSString* const kUserDefaultsHTMLOutputSizeKey   = @"htmlOutputSize";
 @property (nonatomic) BOOL mouseDownRecursionGuard;
 @end
 
-@implementation ProjectLayoutView { OBJC_WATCH_LEAKS(ProjectLayoutView); }
+@implementation ProjectLayoutView
 + (void)initialize
 {
-	[[NSUserDefaults standardUserDefaults] registerDefaults:@{
+	[NSUserDefaults.standardUserDefaults registerDefaults:@{
 		kUserDefaultsFileBrowserWidthKey: @250,
 		kUserDefaultsHTMLOutputSizeKey:   NSStringFromSize(NSMakeSize(200, 200))
 	}];
@@ -30,23 +31,23 @@ NSString* const kUserDefaultsHTMLOutputSizeKey   = @"htmlOutputSize";
 	if(self = [super initWithFrame:aRect])
 	{
 		_myConstraints    = [NSMutableArray array];
-		_fileBrowserWidth = [[NSUserDefaults standardUserDefaults] integerForKey:kUserDefaultsFileBrowserWidthKey];
-		_htmlOutputSize   = NSSizeFromString([[NSUserDefaults standardUserDefaults] stringForKey:kUserDefaultsHTMLOutputSizeKey]);
+		_fileBrowserWidth = [NSUserDefaults.standardUserDefaults integerForKey:kUserDefaultsFileBrowserWidthKey];
+		_htmlOutputSize   = NSSizeFromString([NSUserDefaults.standardUserDefaults stringForKey:kUserDefaultsHTMLOutputSizeKey]);
 
 		[self userDefaultsDidChange:nil];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(userDefaultsDidChange:) name:NSUserDefaultsDidChangeNotification object:[NSUserDefaults standardUserDefaults]];
+		OakObserveUserDefaults(self);
 	}
 	return self;
 }
 
 - (void)dealloc
 {
-	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	[NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
 - (void)userDefaultsDidChange:(NSNotification*)aNotification
 {
-	self.htmlOutputOnRight = [[[NSUserDefaults standardUserDefaults] stringForKey:kUserDefaultsHTMLOutputPlacementKey] isEqualToString:@"right"];
+	self.htmlOutputOnRight = [[NSUserDefaults.standardUserDefaults stringForKey:kUserDefaultsHTMLOutputPlacementKey] isEqualToString:@"right"];
 }
 
 - (NSView*)replaceView:(NSView*)oldView withView:(NSView*)newView
@@ -64,25 +65,36 @@ NSString* const kUserDefaultsHTMLOutputSizeKey   = @"htmlOutputSize";
 
 - (void)updateKeyViewLoop
 {
-	OakSetupKeyViewLoop(@[
-		_documentView    ?: [NSNull null],
-		_htmlOutputView  ?: [NSNull null],
-		_fileBrowserView ?: [NSNull null],
-	], NO);
+	NSMutableArray<NSView*>* views = [NSMutableArray array];
+	for(NSView* view : { _documentView, _htmlOutputView, _fileBrowserView })
+	{
+		if(view)
+			[views addObject:view];
+	}
+	OakSetupKeyViewLoop(views);
 }
 
 - (void)setDocumentView:(NSView*)aDocumentView       { _documentView = [self replaceView:_documentView withView:aDocumentView]; [self updateKeyViewLoop]; }
 
+- (NSView*)createDividerAlongYAxis:(BOOL)flag
+{
+	NSView* res = OakCreateNSBoxSeparator();
+	res.translatesAutoresizingMaskIntoConstraints = NO;
+	[res addConstraint:[NSLayoutConstraint constraintWithItem:res attribute:(flag ? NSLayoutAttributeWidth : NSLayoutAttributeHeight) relatedBy:NSLayoutRelationEqual toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1 constant:1]];
+	[res addConstraint:[NSLayoutConstraint constraintWithItem:res attribute:(flag ? NSLayoutAttributeHeight : NSLayoutAttributeWidth) relatedBy:NSLayoutRelationGreaterThanOrEqual toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1 constant:2]];
+	return res;
+}
+
 - (void)setHtmlOutputView:(NSView*)aHtmlOutputView
 {
-	_htmlOutputDivider = [self replaceView:_htmlOutputDivider withView:(aHtmlOutputView ? (_htmlOutputOnRight ? OakCreateVerticalLine(OakBackgroundFillViewStyleDarkDivider) : OakCreateHorizontalLine(OakBackgroundFillViewStyleDarkDivider)) : nil)];
+	_htmlOutputDivider = [self replaceView:_htmlOutputDivider withView:(aHtmlOutputView ? [self createDividerAlongYAxis:_htmlOutputOnRight] : nil)];
 	_htmlOutputView    = [self replaceView:_htmlOutputView withView:aHtmlOutputView];
 	[self updateKeyViewLoop];
 }
 
 - (void)setFileBrowserView:(NSView*)aFileBrowserView
 {
-	_fileBrowserDivider = [self replaceView:_fileBrowserDivider withView:aFileBrowserView ? OakCreateVerticalLine(OakBackgroundFillViewStyleDarkDivider) : nil];
+	_fileBrowserDivider = [self replaceView:_fileBrowserDivider withView:aFileBrowserView ? [self createDividerAlongYAxis:YES] : nil];
 	_fileBrowserView    = [self replaceView:_fileBrowserView withView:aFileBrowserView];
 	[self updateKeyViewLoop];
 }
@@ -332,7 +344,7 @@ NSString* const kUserDefaultsHTMLOutputSizeKey   = @"htmlOutputSize";
 				}
 				self.htmlOutputSizeConstraint.priority   = NSLayoutPriorityDragThatCannotResizeWindow-1;
 
-				[[NSUserDefaults standardUserDefaults] setObject:NSStringFromSize(_htmlOutputSize) forKey:kUserDefaultsHTMLOutputSizeKey];
+				[NSUserDefaults.standardUserDefaults setObject:NSStringFromSize(_htmlOutputSize) forKey:kUserDefaultsHTMLOutputSizeKey];
 			}
 			else if(view == _fileBrowserView)
 			{
@@ -341,7 +353,7 @@ NSString* const kUserDefaultsHTMLOutputSizeKey   = @"htmlOutputSize";
 				self.fileBrowserWidthConstraint.constant = _fileBrowserWidth;
 				self.fileBrowserWidthConstraint.priority = NSLayoutPriorityDragThatCannotResizeWindow-1;
 
-				[[NSUserDefaults standardUserDefaults] setInteger:_fileBrowserWidth forKey:kUserDefaultsFileBrowserWidthKey];
+				[NSUserDefaults.standardUserDefaults setInteger:_fileBrowserWidth forKey:kUserDefaultsFileBrowserWidthKey];
 			}
 
 			[[self window] invalidateCursorRectsForView:self];

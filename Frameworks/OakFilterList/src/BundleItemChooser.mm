@@ -152,7 +152,7 @@ static NSString* OakMenuItemIdentifier (NSMenuItem* menuItem)
 
 		NSMutableAttributedString* str = CreateAttributedStringWithMarkedUpRanges(name, cover_name, NSLineBreakByTruncatingTail);
 		if(_eclipsed)
-			[str addAttribute:NSStrikethroughStyleAttributeName value:@(NSUnderlineStyleSingle|NSUnderlinePatternSolid) range:NSMakeRange(0, str.string.length)];
+			[str addAttribute:NSStrikethroughStyleAttributeName value:@(NSUnderlineStyleSingle|NSUnderlinePatternSolid) range:NSMakeRange(0, str.length)];
 
 		self.name = str;
 		self.path = CreateAttributedStringWithMarkedUpRanges(path, cover_path, NSLineBreakByTruncatingHead);
@@ -213,7 +213,14 @@ _OutputIter copy_menu_items (NSMenu* menu, _OutputIter out, NSArray* parentNames
 {
 	for(NSMenuItem* item in [menu itemArray])
 	{
-		if([item action] == @selector(performBundleItemWithUUIDStringFrom:) || [item action] == @selector(takeThemeUUIDFrom:))
+		std::set<SEL> excludeItemsWithActions = {
+			@selector(performBundleItemWithUUIDStringFrom:),
+			@selector(takeThemeAppearanceFrom:),
+			@selector(takeUniversalThemeUUIDFrom:),
+			@selector(takeDarkThemeUUIDFrom:),
+		};
+
+		if(excludeItemsWithActions.find(item.action) != excludeItemsWithActions.end())
 			continue;
 
 		if(id target = [NSApp targetForAction:[item action]])
@@ -221,7 +228,7 @@ _OutputIter copy_menu_items (NSMenu* menu, _OutputIter out, NSArray* parentNames
 			if(![target respondsToSelector:@selector(validateMenuItem:)] || [target validateMenuItem:item])
 			{
 				NSString* title = [item title];
-				if([item state] == NSOnState)
+				if([item state] == NSControlStateValueOn)
 				{
 					if([[[item onStateImage] name] isEqualToString:@"NSMenuItemBullet"])
 							title = [title stringByAppendingString:@" (•)"];
@@ -287,8 +294,9 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(4)-[icon]-(4)-[name]-(4)-[shortcut]-(8)-|" options:0 metrics:nil views:views]];
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[context]-(8)-|" options:0 metrics:nil views:views]];
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:[name]-(2)-[context]-(5)-|" options:NSLayoutFormatAlignAllLeading metrics:nil views:views]];
-		[self addConstraint:[NSLayoutConstraint constraintWithItem:self attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual toItem:imageView attribute:NSLayoutAttributeCenterY multiplier:1 constant:0]];
-		[self addConstraint:[NSLayoutConstraint constraintWithItem:textField attribute:NSLayoutAttributeBaseline relatedBy:NSLayoutRelationEqual toItem:shortcutTextField attribute:NSLayoutAttributeBaseline multiplier:1 constant:0]];
+
+		[imageView.centerYAnchor constraintEqualToAnchor:self.centerYAnchor].active = YES;
+		[shortcutTextField.firstBaselineAnchor constraintEqualToAnchor:textField.firstBaselineAnchor].active = YES;
 
 		self.imageView         = imageView;
 		self.textField         = textField;
@@ -405,7 +413,7 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 @property (nonatomic) NSView* titlebarView;
 @property (nonatomic) OakKeyEquivalentView* keyEquivalentView;
 @property (nonatomic) NSPopUpButton* actionsPopUpButton;
-@property (nonatomic) OakScopeBarView* scopeBar;
+@property (nonatomic) OakScopeBarViewController* scopeBar;
 @property (nonatomic) NSView* topDivider;
 @property (nonatomic) NSView* bottomDivider;
 @property (nonatomic) NSButton* selectButton;
@@ -468,11 +476,11 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 		[actionMenu addItem:[NSMenuItem separatorItem]];
 		[actionMenu addItemWithTitle:@"Search All Scopes" action:@selector(toggleSearchAllScopes:) keyEquivalent:key < 9 ? [NSString stringWithFormat:@"%c", '0' + (++key % 10)] : @""];
 
-		self.scopeBar = [OakScopeBarView new];
+		self.scopeBar = [[OakScopeBarViewController alloc] init];
 		self.scopeBar.labels = _sourceListLabels;
 
-		self.topDivider          = [self makeDividerView];
-		self.bottomDivider       = [self makeDividerView];
+		self.topDivider          = OakCreateNSBoxSeparator();
+		self.bottomDivider       = OakCreateNSBoxSeparator();
 
 		self.selectButton             = OakCreateButton(@"Select");
 		self.selectButton.font        = [NSFont messageFontOfSize:[NSFont systemFontSizeForControlSize:NSControlSizeSmall]];
@@ -490,7 +498,7 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 			@"searchField": self.keyEquivalentInput ? self.keyEquivalentView : self.searchField,
 			@"actions":     self.actionsPopUpButton,
 			@"dividerView": self.topDivider,
-			@"scopeBar":    self.scopeBar,
+			@"scopeBar":    self.scopeBar.view,
 		};
 
 		self.titlebarView = [[NSView alloc] initWithFrame:NSZeroRect];
@@ -509,24 +517,25 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 		NSView* footerView = self.footerView;
 		OakAddAutoLayoutViewsToSuperview(footerViews.allValues, footerView);
 
-		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[dividerView]|"                       options:0 metrics:nil views:footerViews]];
-		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(24)-[status]-[edit]-[select]-|"     options:NSLayoutFormatAlignAllCenterY metrics:nil views:footerViews]];
-		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[dividerView(==1)]-(4)-[select]-(5)-|" options:0 metrics:nil views:footerViews]];
+		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[dividerView]|"                         options:0 metrics:nil views:footerViews]];
+		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(24)-[status]-(>=0)-[edit]-[select]-|" options:NSLayoutFormatAlignAllCenterY metrics:nil views:footerViews]];
+		[footerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[dividerView(==1)]-(4)-[select]-(5)-|"  options:0 metrics:nil views:footerViews]];
 
 		[self updateScrollViewInsets];
 
-		OakSetupKeyViewLoop(@[ self.searchField, self.actionsPopUpButton, self.scopeBar, self.editButton, self.selectButton ]);
+		OakSetupKeyViewLoop(@[ self.searchField, self.actionsPopUpButton, self.scopeBar.view, self.editButton, self.selectButton ]);
+		self.window.initialFirstResponder = self.searchField;
 
 		[self.scopeBar bind:NSValueBinding toObject:self withKeyPath:@"sourceIndex" options:nil];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowDidChangeKeyStatus:) name:NSWindowDidBecomeKeyNotification object:self.window];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowDidChangeKeyStatus:) name:NSWindowDidResignKeyNotification object:self.window];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(windowDidChangeKeyStatus:) name:NSWindowDidBecomeKeyNotification object:self.window];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(windowDidChangeKeyStatus:) name:NSWindowDidResignKeyNotification object:self.window];
 	}
 	return self;
 }
 
 - (void)dealloc
 {
-	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	[NSNotificationCenter.defaultCenter removeObserver:self];
 	[_keyEquivalentView removeObserver:self forKeyPath:@"recording" context:kRecordingBinding];
 	[_scopeBar unbind:NSValueBinding];
 }
@@ -557,7 +566,7 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 	if(context == kRecordingBinding)
 	{
 		NSNumber* isRecording = change[NSKeyValueChangeNewKey];
-		self.drawTableViewAsHighlighted = ![isRecording boolValue];
+		self.drawTableViewAsHighlighted = !isRecording.boolValue;
 	}
 	else
 	{
@@ -579,7 +588,7 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 		@"searchField": self.keyEquivalentInput ? self.keyEquivalentView : self.searchField,
 		@"actions":     self.actionsPopUpButton,
 		@"dividerView": self.topDivider,
-		@"scopeBar":    self.scopeBar,
+		@"scopeBar":    self.scopeBar.view,
 	};
 
 	NSMutableArray* constraints = [NSMutableArray array];
@@ -692,6 +701,16 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 	_scope = aScope;
 	_unfilteredItems = nil;
 	[self updateItems:self];
+}
+
+- (void)setHasSelection:(BOOL)flag
+{
+	if(_hasSelection != flag)
+	{
+		_hasSelection = flag;
+		_unfilteredItems = nil;
+		[self updateItems:self];
+	}
 }
 
 - (void)setKeyEquivalentString:(NSString*)aString
@@ -964,9 +983,9 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 - (BOOL)validateMenuItem:(NSMenuItem*)aMenuItem
 {
 	if(aMenuItem.action == @selector(takeBundleItemFieldFrom:))
-		aMenuItem.state = self.bundleItemField == aMenuItem.tag ? NSOnState : NSOffState;
+		aMenuItem.state = self.bundleItemField == aMenuItem.tag ? NSControlStateValueOn : NSControlStateValueOff;
 	else if(aMenuItem.action == @selector(toggleSearchAllScopes:))
-		aMenuItem.state = self.searchAllScopes ? NSOnState : NSOffState;
+		aMenuItem.state = self.searchAllScopes ? NSControlStateValueOn : NSControlStateValueOff;
 
 	return YES;
 }
@@ -1033,6 +1052,6 @@ static std::vector<bundles::item_ptr> relevant_items_in_scope (scope::context_t 
 	[self.window close];
 }
 
-- (IBAction)selectNextTab:(id)sender     { self.sourceIndex = (self.sourceIndex + 1) % self.sourceListLabels.count; }
-- (IBAction)selectPreviousTab:(id)sender { self.sourceIndex = (self.sourceIndex + self.sourceListLabels.count - 1) % self.sourceListLabels.count; }
+- (IBAction)selectNextTab:(id)sender     { [_scopeBar selectNextButton:sender]; }
+- (IBAction)selectPreviousTab:(id)sender { [_scopeBar selectPreviousButton:sender]; }
 @end

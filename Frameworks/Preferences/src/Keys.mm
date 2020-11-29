@@ -26,7 +26,6 @@ static NSDictionary* default_settings ()
 		kUserDefaultsShowFileExtensionsKey:      @NO,
 		kUserDefaultsEnvironmentVariablesKey:    default_environment(),
 		kUserDefaultsDisableBundleUpdatesKey:    @NO,
-		kUserDefaultsLastBundleUpdateCheckKey:   [NSDate distantPast],
 		kUserDefaultsDisableRMateServerKey:      @NO,
 		kUserDefaultsRMateServerListenKey:       kRMateServerListenLocalhost,
 		kUserDefaultsRMateServerPortKey:         @"52698",
@@ -38,7 +37,7 @@ static NSDictionary* default_settings ()
 
 static bool register_defaults ()
 {
-	[[NSUserDefaults standardUserDefaults] registerDefaults:default_settings()];
+	[NSUserDefaults.standardUserDefaults registerDefaults:default_settings()];
 	return true;
 }
 

@@ -5,24 +5,20 @@
 #import <ns/ns.h>
 #import <oak/debug.h>
 
-OAK_DEBUG_VAR(HTMLOutputWindow);
-
-@interface HTMLOutputWindowController ()
-{
-	OBJC_WATCH_LEAKS(HTMLOutputWindowController);
-}
+@interface HTMLOutputWindowController () <NSWindowDelegate>
 @property (nonatomic) HTMLOutputWindowController* retainedSelf;
 @end
 
 @implementation HTMLOutputWindowController
 - (instancetype)init
 {
-	if(self = [super init])
-	{
-		NSRect rect = [[NSScreen mainScreen] visibleFrame];
-		rect = NSIntegralRect(NSInsetRect(rect, NSWidth(rect) / 3, NSHeight(rect) / 5));
+	NSRect rect = [[NSScreen mainScreen] visibleFrame];
+	rect = NSIntegralRect(NSInsetRect(rect, NSWidth(rect) / 3, NSHeight(rect) / 5));
+	NSWindow* window = [[NSPanel alloc] initWithContentRect:rect styleMask:(NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable) backing:NSBackingStoreBuffered defer:NO];
 
-		self.window         = [[NSWindow alloc] initWithContentRect:rect styleMask:(NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable) backing:NSBackingStoreBuffered defer:NO];
+	if(self = [super initWithWindow:window])
+	{
+		self.window         = window;
 		self.htmlOutputView = [[OakHTMLOutputView alloc] init];
 
 		[self.window bind:NSTitleBinding toObject:self.htmlOutputView withKeyPath:@"mainFrameTitle" options:nil];
@@ -31,10 +27,7 @@ OAK_DEBUG_VAR(HTMLOutputWindow);
 		[self.window setDelegate:self];
 		[self.window setReleasedWhenClosed:NO];
 		[self.window setCollectionBehavior:NSWindowCollectionBehaviorMoveToActiveSpace|NSWindowCollectionBehaviorFullScreenAuxiliary];
-
-		// Register to application activation/deactivation notification so we can tweak our collection behavior
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationDidActivate:) name:NSApplicationDidBecomeActiveNotification object:nil];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationDidDeactivate:) name:NSApplicationDidResignActiveNotification object:nil];
+		[self.window setHidesOnDeactivate:NO];
 	}
 	return self;
 }
@@ -46,36 +39,14 @@ OAK_DEBUG_VAR(HTMLOutputWindow);
 	return self;
 }
 
-- (void)applicationDidActivate:(NSNotification*)notification
-{
-	// Starting with 10.11 behavior must be changed after current event loop cycle <rdar://23587833>
-	dispatch_async(dispatch_get_main_queue(), ^{
-		self.window.collectionBehavior |= NSWindowCollectionBehaviorMoveToActiveSpace;
-	});
-}
-
-- (void)applicationDidDeactivate:(NSNotification*)notification
-{
-	// Starting with 10.11 behavior must be changed after current event loop cycle <rdar://23587833>
-	dispatch_async(dispatch_get_main_queue(), ^{
-		self.window.collectionBehavior &= ~NSWindowCollectionBehaviorMoveToActiveSpace;
-	});
-}
-
 - (void)showWindow:(id)sender
 {
 	self.retainedSelf = self;
-	[self.window makeKeyAndOrderFront:nil];
-}
-
-- (void)close
-{
-	[self.window close];
+	[super showWindow:sender];
 }
 
 - (BOOL)windowShouldClose:(id)sender
 {
-	D(DBF_HTMLOutputWindow, bug("\n"););
 	if(!_htmlOutputView.isRunningCommand)
 		return YES;
 
@@ -96,20 +67,7 @@ OAK_DEBUG_VAR(HTMLOutputWindow);
 
 - (void)dealloc
 {
-	D(DBF_HTMLOutputWindow, bug("\n"););
-	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	[NSNotificationCenter.defaultCenter removeObserver:self];
 	self.window.delegate = nil;
-}
-
-- (IBAction)toggleHTMLOutput:(id)sender
-{
-	[self.window performClose:self];
-}
-
-- (BOOL)validateMenuItem:(NSMenuItem*)menuItem
-{
-	if([menuItem action] == @selector(toggleHTMLOutput:))
-		[menuItem setTitle:@"Hide HTML Output"];
-	return YES;
 }
 @end

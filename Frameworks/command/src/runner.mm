@@ -7,8 +7,6 @@
 #include <regexp/format_string.h>
 #include <oak/datatypes.h>
 
-OAK_DEBUG_VAR(Command_Runner);
-
 static std::string trim_right (std::string const& str, std::string const& trimChars = " \t\n")
 {
 	std::string::size_type len = str.find_last_not_of(trimChars);
@@ -32,7 +30,7 @@ static std::tuple<pid_t, int, int> my_fork (char const* cmd, int inputRead, std:
 			else
 			{
 				newEnv.emplace(pair.first, "(truncated)");
-				fprintf(stderr, "*** variable exceeds ARG_MAX: %s\n", pair.first.c_str());
+				os_log_error(OS_LOG_DEFAULT, "Variable exceeds ARG_MAX: %{public}s", pair.first.c_str());
 			}
 		}
 		return my_fork(cmd, inputRead, newEnv, workingDir);
@@ -139,6 +137,33 @@ namespace command
 			command->insert(0, "#!/bin/bash\n[[ -f \"${TM_SUPPORT_PATH}/lib/bash_init.sh\" ]] && . \"${TM_SUPPORT_PATH}/lib/bash_init.sh\"\n\n");
 	}
 
+	static NSString* hash (NSData* data)
+	{
+		uint8_t digest[CC_SHA1_DIGEST_LENGTH];
+		CC_SHA1(data.bytes, data.length, digest);
+
+		NSMutableString* output = [NSMutableString stringWithCapacity:CC_SHA1_DIGEST_LENGTH * 2];
+		for(int i = 0; i < CC_SHA1_DIGEST_LENGTH; i++)
+			[output appendFormat:@"%02x", digest[i]];
+		return output;
+	}
+
+	std::string create_script_path (std::string const& command)
+	{
+		NSData* data = [NSData dataWithBytesNoCopy:(void*)command.data() length:command.size() freeWhenDone:NO];
+
+		NSString* scriptPath = [NSString pathWithComponents:@[ NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject, NSBundle.mainBundle.bundleIdentifier, @"Scripts", hash(data) ]];
+		if(![NSFileManager.defaultManager isExecutableFileAtPath:scriptPath])
+		{
+			[NSFileManager.defaultManager createDirectoryAtPath:scriptPath.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nullptr];
+
+			[data writeToFile:scriptPath atomically:NO];
+			[NSFileManager.defaultManager setAttributes:@{ NSFilePosixPermissions: @(S_IRWXU) } ofItemAtPath:scriptPath error:nil];
+		}
+
+		return scriptPath.fileSystemRepresentation;
+	}
+
 	// ==================
 	// = Command Runner =
 	// ==================
@@ -159,7 +184,7 @@ namespace command
 		ASSERT(_delegate);
 		ASSERT(_command.command.find("#!") == 0);
 
-		_temp_path = path::temp("command", _command.command);
+		_temp_path = create_script_path(_command.command);
 		ASSERT(_temp_path != NULL_STR);
 
 		int stdinRead, stdinWrite;
@@ -258,11 +283,10 @@ namespace command
 
 	void runner_t::did_exit (int status)
 	{
-		D(DBF_Command_Runner, bug("%d\n", status););
 		if(WIFSIGNALED(status))
-			fprintf(stderr, "*** process terminated: %s\n", strsignal(WTERMSIG(status)));
+			os_log_error(OS_LOG_DEFAULT, "Process terminated after receiving %{public}s", strsignal(WTERMSIG(status)));
 		else if(!WIFEXITED(status))
-			fprintf(stderr, "*** process terminated abnormally %d\n", status);
+			os_log_error(OS_LOG_DEFAULT, "Process terminated abnormally %d", status);
 
 		_process_id = -1;
 
@@ -272,7 +296,6 @@ namespace command
 		newOut.swap(_out);
 		newErr.swap(_err);
 
-		unlink(_temp_path.c_str());
 		_temp_path = NULL_STR;
 
 		output::type placement         = _command.output;
@@ -296,7 +319,7 @@ namespace command
 					placement = output::at_caret;
 				else
 					placement = output::after_input;
-			  format = output_format::snippet;
+				format = output_format::snippet;
 			}
 			break;
 			case exit_show_html:           placement = output::new_window;        format = output_format::html;    break;
@@ -304,7 +327,6 @@ namespace command
 			case exit_create_new_document: placement = output::new_window;        format = output_format::text;    break;
 		}
 
-		D(DBF_Command_Runner, bug("placement %d, format %d\n", placement, format););
 		if(rc != 0 && !_user_abort && !(200 <= rc && rc < exit_last))
 		{
 			_delegate->show_error(_command, rc, _out, _err);

@@ -6,9 +6,6 @@
 #include <regexp/format_string.h>
 #include <parse/grammar.h>
 
-OAK_DEBUG_VAR(Buffer);
-OAK_DEBUG_VAR(Buffer_Parsing);
-
 namespace ng
 {
 	buffer_t::buffer_t () : _grammar_callback(*this), _revision(0), _next_revision(1), _spelling_language("")
@@ -109,7 +106,7 @@ namespace ng
 	bool buffer_t::visit_data (std::function<void(char const*, size_t, size_t, bool*)> const& f) const
 	{
 		size_t offset = 0;
-		for(auto const& memory : _storage)
+		for(auto memory : _storage)
 		{
 			bool stop = false;
 			f(memory.data(), offset, memory.size(), &stop);

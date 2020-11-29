@@ -1,12 +1,14 @@
 #import "OakScopeBarView.h"
 #import "OakUIConstructionFunctions.h"
 
-static NSButton* OakCreateScopeButton (NSString* label, NSUInteger tag, SEL action, id target)
+static NSButton* OakCreateScopeButton (NSString* label, NSUInteger tag, SEL action, id target, NSControlSize controlSize)
 {
-	NSButton* res = [NSButton new];
+	NSButton* res = [[NSButton alloc] initWithFrame:NSZeroRect];
 	res.accessibilityRole               = NSAccessibilityRadioButtonRole;
-	res.bezelStyle                      = NSRecessedBezelStyle;
-	res.buttonType                      = NSPushOnPushOffButton;
+	res.bezelStyle                      = NSBezelStyleRecessed;
+	res.buttonType                      = NSButtonTypePushOnPushOff;
+	res.controlSize                     = controlSize;
+	res.font                            = [NSFont messageFontOfSize:[NSFont systemFontSizeForControlSize:controlSize]];
 	res.title                           = label;
 	res.tag                             = tag;
 	res.action                          = action;
@@ -16,19 +18,50 @@ static NSButton* OakCreateScopeButton (NSString* label, NSUInteger tag, SEL acti
 	return res;
 }
 
-@interface OakScopeBarView () <NSAccessibilityGroup>
-@property (nonatomic) NSArray* buttons;
-@property (nonatomic) NSMutableArray* myConstraints;
+@interface OakScopeBarViewController ()
+@property (nonatomic) NSStackView* stackView;
 @end
 
-@implementation OakScopeBarView
-- (instancetype)initWithFrame:(NSRect)aRect
+@implementation OakScopeBarViewController
+- (void)loadView
 {
-	if(self = [super initWithFrame:aRect])
+	_stackView = [[NSStackView alloc] initWithFrame:NSZeroRect];
+	_stackView.accessibilityRole = NSAccessibilityRadioGroupRole;
+	[self updateButtons];
+	self.view = _stackView;
+}
+
+- (void)updateButtons
+{
+	if(!_stackView)
+		return;
+
+	for(NSView* button in _stackView.arrangedSubviews)
+		[_stackView removeArrangedSubview:button];
+
+	switch(_controlSize)
 	{
-		self.accessibilityRole = NSAccessibilityRadioGroupRole;
+		case NSControlSizeRegular: _stackView.spacing = 4; break;
+		case NSControlSizeSmall:   _stackView.spacing = 2; break;
+		case NSControlSizeMini:    _stackView.spacing = 2; break;
 	}
-	return self;
+
+	for(NSUInteger i = 0; i < _labels.count; ++i)
+	{
+		NSButton* button = OakCreateScopeButton(_labels[i], i, @selector(takeSelectedIndexFrom:), self, _controlSize);
+		button.state = i == _selectedIndex ? NSControlStateValueOn : NSControlStateValueOff;
+		[_stackView addArrangedSubview:button];
+	}
+
+	OakSetupKeyViewLoop([@[ _stackView ] arrayByAddingObjectsFromArray:_stackView.arrangedSubviews]);
+}
+
+- (void)setControlSize:(NSControlSize)newControlSize
+{
+	if(_controlSize == newControlSize)
+		return;
+	_controlSize = newControlSize;
+	[self updateButtons];
 }
 
 - (void)setLabels:(NSArray*)anArray
@@ -36,71 +69,79 @@ static NSButton* OakCreateScopeButton (NSString* label, NSUInteger tag, SEL acti
 	if(_labels == anArray || [_labels isEqualToArray:anArray])
 		return;
 	_labels = anArray;
-
-	_selectedIndex = NSNotFound;
-	for(NSView* button in _buttons)
-		[button removeFromSuperview];
-
-	NSMutableArray* buttons = [NSMutableArray new];
-	for(NSInteger i = 0; i < anArray.count; ++i)
-		[buttons addObject:OakCreateScopeButton(anArray[i], i, @selector(takeSelectedIndexFrom:), self)];
-	_buttons = buttons;
-
-	OakAddAutoLayoutViewsToSuperview(_buttons, self);
-	OakSetupKeyViewLoop([@[ self ] arrayByAddingObjectsFromArray:_buttons], NO);
-	if(_buttons.count)
-		self.selectedIndex = 0;
-
-	[self setNeedsUpdateConstraints:YES];
+	[self updateButtons];
 }
 
-- (void)updateConstraints
+- (void)updateGoToMenu:(NSMenu*)aMenu
 {
-	if(_myConstraints)
-		[self removeConstraints:_myConstraints];
-	_myConstraints = [NSMutableArray array];
-	[super updateConstraints];
-
-	if(_buttons.count)
+	if(self.view.window.isKeyWindow)
 	{
-		[_myConstraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[view]|" options:0 metrics:nil views:@{ @"view": _buttons[0] }]];
-		[_myConstraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[view]" options:0 metrics:nil views:@{ @"view": _buttons[0] }]];
-		[_myConstraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[view]|" options:0 metrics:nil views:@{ @"view": _buttons[_buttons.count-1] }]];
-		for(size_t i = 0; i < [_buttons count]-1; ++i)
+		for(int i = 0; i < _labels.count; ++i)
 		{
-			[_myConstraints addObject:[NSLayoutConstraint constraintWithItem:_buttons[i] attribute:NSLayoutAttributeRight relatedBy:NSLayoutRelationEqual toItem:_buttons[i+1] attribute:NSLayoutAttributeLeft multiplier:1 constant:0]];
-			[_myConstraints addObject:[NSLayoutConstraint constraintWithItem:_buttons[i] attribute:NSLayoutAttributeBaseline relatedBy:NSLayoutRelationEqual toItem:_buttons[i+1] attribute:NSLayoutAttributeBaseline multiplier:1 constant:0]];
+			NSMenuItem* item = [aMenu addItemWithTitle:_labels[i] action:@selector(takeSelectedIndexFrom:) keyEquivalent:i < 9 ? [NSString stringWithFormat:@"%c", '1' + i] : @""];
+			item.tag = i;
+			item.target = self;
 		}
 	}
+	else
+	{
+		[aMenu addItemWithTitle:@"No Sources" action:@selector(nop:) keyEquivalent:@""];
+	}
+}
 
-	[self addConstraints:_myConstraints];
+- (void)selectNextButton:(id)sender
+{
+	self.selectedIndex = (_selectedIndex + 1) % _labels.count;
+}
+
+- (void)selectPreviousButton:(id)sender
+{
+	self.selectedIndex = (_selectedIndex + _labels.count - 1) % _labels.count;
 }
 
 - (void)takeSelectedIndexFrom:(id)sender
 {
 	if([sender respondsToSelector:@selector(tag)])
-		self.selectedIndex = [sender tag];
+	{
+		NSUInteger newSelectedIndex = [sender tag];
+		if([sender isKindOfClass:[NSButton class]])
+		{
+			NSButton* button = sender;
+			if(button.state == NSControlStateValueOff && _allowsEmptySelection)
+				newSelectedIndex = NSNotFound;
+		}
+		self.selectedIndex = newSelectedIndex;
+	}
 }
 
-- (void)setSelectedIndex:(NSInteger)newSelectedIndex
+- (BOOL)validateMenuItem:(NSMenuItem*)item
 {
-	for(NSButton* button in _buttons)
-		[button setState:[button tag] == newSelectedIndex ? NSOnState : NSOffState];
-	if(_selectedIndex == newSelectedIndex)
-		return;
+	if(item.action == @selector(takeSelectedIndexFrom:))
+		item.state = [item tag] == self.selectedIndex ? NSControlStateValueOn : NSControlStateValueOff;
+	return YES;
+}
+
+- (void)setSelectedIndex:(NSUInteger)newSelectedIndex
+{
+	BOOL notifyObservers = _selectedIndex != newSelectedIndex;
 
 	_selectedIndex = newSelectedIndex;
+	for(NSButton* button in _stackView.arrangedSubviews)
+		button.state = button.tag == _selectedIndex ? NSControlStateValueOn : NSControlStateValueOff;
 
-	if(NSDictionary* info = [self infoForBinding:NSValueBinding])
+	if(notifyObservers)
 	{
-		id controller     = info[NSObservedObjectKey];
-		NSString* keyPath = info[NSObservedKeyPathKey];
-		if(controller && controller != [NSNull null] && keyPath && (id)keyPath != [NSNull null])
+		if(NSDictionary* info = [self infoForBinding:NSValueBinding])
 		{
-			id newValue = @(_selectedIndex);
-			id oldValue = [controller valueForKeyPath:keyPath];
-			if(!oldValue || ![oldValue isEqual:newValue])
-				[controller setValue:newValue forKeyPath:keyPath];
+			id controller     = info[NSObservedObjectKey];
+			NSString* keyPath = info[NSObservedKeyPathKey];
+			if(controller && controller != [NSNull null] && keyPath && (id)keyPath != [NSNull null])
+			{
+				id newValue = [NSNumber numberWithUnsignedInteger:_selectedIndex];
+				id oldValue = [controller valueForKeyPath:keyPath];
+				if(!oldValue || ![oldValue isEqual:newValue])
+					[controller setValue:newValue forKeyPath:keyPath];
+			}
 		}
 	}
 }

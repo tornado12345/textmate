@@ -9,9 +9,6 @@
 #include <regexp/format_string.h>
 #include <cf/cf.h>
 
-OAK_DEBUG_VAR(IO_Path);
-OAK_DEBUG_VAR(IO_AuthIO);
-
 namespace path
 {
 	// ==============================
@@ -345,7 +342,7 @@ namespace path
 				else
 				{
 					std::string errStr = len == -1 ? strerror(errno) : text::format("Result outside allowed range %zd", len);
-					fprintf(stderr, "readlink(\"%s\"): %s\n", path.c_str(), errStr.c_str());
+					os_log_error(OS_LOG_DEFAULT, "readlink(\"%{public}s\"): %{public}s", path.c_str(), errStr.c_str());
 				}
 			}
 			else if(S_ISREG(buf.st_mode))
@@ -427,7 +424,7 @@ namespace path
 			{
 				if(access(buf, F_OK) == 0)
 					return std::string(buf);
-				fprintf(stderr, "F_GETPATH gave us %s, but that file does not exist (retry %zu)\n", buf, i);
+				os_log_error(OS_LOG_DEFAULT, "F_GETPATH gave us %{public}s, but that file does not exist (retry %zu)", buf, i);
 				usleep(10);
 			}
 		}
@@ -438,7 +435,7 @@ namespace path
 	// = Helper stuff =
 	// ================
 
-	std::string system_display_name (std::string const& path)
+	static std::string system_display_name (std::string const& path)
 	{
 		std::string res = name(path);
 		if(oak::has_prefix(path, "/Volumes/") || oak::has_prefix(path, "/home/"))
@@ -447,7 +444,7 @@ namespace path
 		if(CFURLRef url = CFURLCreateFromFileSystemRepresentation(kCFAllocatorDefault, (UInt8 const*)path.data(), path.size(), false))
 		{
 			CFStringRef displayName;
-			if(LSCopyDisplayNameForURL(url, &displayName) == noErr)
+			if(CFURLCopyResourcePropertyForKey(url, kCFURLLocalizedNameKey, &displayName, nullptr))
 			{
 				res = cf::to_s(displayName);
 				CFRelease(displayName);
@@ -587,16 +584,8 @@ namespace path
 	{
 		intermediate_t dest(path);
 
-		int fd = open(dest, O_CREAT|O_TRUNC|O_WRONLY|O_CLOEXEC, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH);
-		if(fd == -1)
-			return false;
-
-		int res DB_VAR = write(fd, first, last - first);
-		ASSERT_EQ(res, last - first);
-		int rc DB_VAR = close(fd);
-		ASSERT_EQ(rc, 0);
-
-		return dest.commit();
+		int fd = dest.open();
+		return fd != -1 && write(fd, first, last - first) == last - first && dest.close();
 	}
 
 	std::string get_attr (std::string const& p, std::string const& attr)
@@ -741,7 +730,6 @@ namespace path
 
 	bool make_dir (std::string const& path)
 	{
-		D(DBF_IO_Path, bug("%s\n", path.c_str()););
 		if(path != NULL_STR && !exists(path))
 		{
 			make_dir(parent(path));
@@ -825,7 +813,7 @@ namespace path
 			}
 			else if((responseFlags & 0x3) == kCFUserNotificationAlternateResponse)
 			{
-				if(CFURLRef url = CFURLCreateWithString(kCFAllocatorDefault, cf::wrap("http://openradar.appspot.com/10261043"), nullptr))
+				if(CFURLRef url = CFURLCreateWithString(kCFAllocatorDefault, cf::wrap("https://openradar.appspot.com/10261043"), nullptr))
 				{
 					if(CFMutableArrayRef urls = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks))
 					{

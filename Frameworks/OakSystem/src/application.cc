@@ -5,29 +5,16 @@
 #include <oak/datatypes.h>
 #include <oak/debug.h>
 
-OAK_DEBUG_VAR(Application);
-
 namespace oak
 {
 	static std::string _app_name     = NULL_STR;
 	static std::string _app_path     = NULL_STR;
 	static std::string _support_path = NULL_STR;
 
-	application_t::application_t (int argc, char const* argv[], bool redirectStdErr)
+	application_t::application_t (int argc, char const* argv[])
 	{
 		_app_name = getenv("OAK_APP_NAME") ?: path::name(argv[0]);
 		_app_path = path::join(path::cwd(), argv[0]);
-
-		if(redirectStdErr)
-		{
-			char const* logPath = getenv("LOG_PATH");
-			if(logPath && path::is_absolute(logPath) && path::make_dir(logPath))
-			{
-				std::string const logFile = path::join(logPath, _app_name + ".log");
-				if(FILE* fp = freopen(logFile.c_str(), "w+", stderr))
-					setlinebuf(fp);
-			}
-		}
 
 		std::string const appBinary = path::join("Contents/MacOS", _app_name);
 		if(_app_path.size() > appBinary.size() && _app_path.find(appBinary) == _app_path.size() - appBinary.size())
@@ -108,7 +95,6 @@ namespace oak
 	void application_t::relaunch (char const* args)
 	{
 		std::string const appPath = path();
-		D(DBF_Application, bug("%s\n", appPath.c_str()););
 		std::string script = text::format("{ kill %1$d; while ps -xp %1$d; do if (( ++n == 300 )); then exit; fi; sleep .2; done; open \"$0\" --args $1; } &>/dev/null &", getpid());
 		io::exec("/bin/sh", "-c", script.c_str(), appPath.c_str(), args, nullptr);
 	}

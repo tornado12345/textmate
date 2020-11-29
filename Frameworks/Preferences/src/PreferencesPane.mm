@@ -1,21 +1,53 @@
 #import "PreferencesPane.h"
 #import <OakFoundation/NSString Additions.h>
+#import <OakAppKit/OakUIConstructionFunctions.h>
 #import <ns/ns.h>
 #import <settings/settings.h>
 
+NSView* OakSetupGridViewWithSeparators (NSGridView* gridView, std::vector<NSUInteger> rows)
+{
+	gridView.rowAlignment = NSGridRowAlignmentFirstBaseline;
+	gridView.rowSpacing   = 8;
+
+	[gridView rowAtIndex:0].topPadding                                  = 20;
+	[gridView rowAtIndex:gridView.numberOfRows-1].bottomPadding         = 20;
+	[gridView columnAtIndex:0].xPlacement                               = NSGridCellPlacementTrailing;
+	[gridView columnAtIndex:0].leadingPadding                           = 8;
+	[gridView columnAtIndex:0].width                                    = 200;
+	[gridView columnAtIndex:gridView.numberOfColumns-1].trailingPadding = 8;
+	[gridView columnAtIndex:gridView.numberOfColumns-1].width           = 400;
+
+	for(NSUInteger row = 0; row < gridView.numberOfRows; ++row)
+		[gridView cellAtColumnIndex:0 rowIndex:row].yPlacement = NSGridCellPlacementNone;
+
+	for(NSUInteger row : rows)
+	{
+		[gridView mergeCellsInHorizontalRange:NSMakeRange(0, gridView.numberOfColumns) verticalRange:NSMakeRange(row, 1)];
+		[gridView cellAtColumnIndex:0 rowIndex:row].contentView = OakCreateNSBoxSeparator();
+		[gridView cellAtColumnIndex:0 rowIndex:row].xPlacement  = NSGridCellPlacementFill;
+		[gridView cellAtColumnIndex:0 rowIndex:row].yPlacement  = NSGridCellPlacementCenter;
+		[gridView rowAtIndex:row].topPadding    = 12;
+		[gridView rowAtIndex:row].bottomPadding = 12;
+		[gridView rowAtIndex:row].rowAlignment  = NSGridRowAlignmentNone;
+	}
+
+	[gridView setContentHuggingPriority:NSLayoutPriorityDefaultHigh-2 forOrientation:NSLayoutConstraintOrientationVertical];
+	gridView.frame = { .size = gridView.fittingSize };
+
+	return gridView;
+}
+
 @interface PreferencesPane ()
-@property (nonatomic, readwrite) NSString* toolbarItemLabel;
-@property (nonatomic, readwrite) NSImage*  toolbarItemImage;
+@property (nonatomic, readwrite) NSImage* toolbarItemImage;
 @end
 
 @implementation PreferencesPane
-- (NSString*)viewIdentifier { return _toolbarItemLabel; }
-
-- (id)initWithNibName:(NSString*)aNibName label:(NSString*)aLabel image:(NSImage*)anImage
+- (id)initWithNibName:(NSNibName)aNibName label:(NSString*)aLabel image:(NSImage*)anImage
 {
 	if(self = [super initWithNibName:aNibName bundle:[NSBundle bundleForClass:[self class]]])
 	{
-		_toolbarItemLabel = aLabel;
+		self.identifier   = aLabel;
+		self.title        = aLabel;
 		_toolbarItemImage = anImage;
 	}
 	return self;
@@ -25,7 +57,7 @@
 {
 	if(NSString* key = [_defaultsProperties objectForKey:aKey])
 	{
-		return [[NSUserDefaults standardUserDefaults] setObject:newValue forKey:key];
+		return [NSUserDefaults.standardUserDefaults setObject:newValue forKey:key];
 	}
 	else if(NSString* key = [_tmProperties objectForKey:aKey])
 	{
@@ -40,7 +72,7 @@
 - (id)valueForUndefinedKey:(NSString*)aKey
 {
 	if(NSString* key = [_defaultsProperties objectForKey:aKey])
-		return [[NSUserDefaults standardUserDefaults] objectForKey:key];
+		return [NSUserDefaults.standardUserDefaults objectForKey:key];
 	else if(NSString* key = [_tmProperties objectForKey:aKey])
 		return [NSString stringWithCxxString:settings_t::raw_get(to_s(key))];
 	return [super valueForUndefinedKey:aKey];
@@ -50,6 +82,6 @@
 {
 	NSString* anchor = [sender isKindOfClass:[NSButton class]] ? [sender alternateTitle] : nil;
 	if(anchor)
-		[[NSHelpManager sharedHelpManager] openHelpAnchor:anchor inBook:[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleHelpBookName"]];
+		[NSHelpManager.sharedHelpManager openHelpAnchor:anchor inBook:[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleHelpBookName"]];
 }
 @end

@@ -23,6 +23,7 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 @interface FFResultsViewController () <NSOutlineViewDataSource, NSOutlineViewDelegate>
 {
 	NSScrollView*  _scrollView;
+	NSOutlineView* _outlineView;
 	NSFont*        _searchResultsFont;
 
 	__weak id      _eventMonitor;
@@ -53,8 +54,8 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 		_button.translatesAutoresizingMaskIntoConstraints = NO;
 		[self addSubview:_button];
 
-		[self addConstraint:[NSLayoutConstraint constraintWithItem:_button attribute:NSLayoutAttributeCenterX relatedBy:NSLayoutRelationEqual toItem:self attribute:NSLayoutAttributeCenterX multiplier:1 constant:0]];
-		[self addConstraint:[NSLayoutConstraint constraintWithItem:_button attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual toItem:self attribute:NSLayoutAttributeCenterY multiplier:1 constant:0]];
+		[_button.centerXAnchor constraintEqualToAnchor:self.centerXAnchor].active = YES;
+		[_button.centerYAnchor constraintEqualToAnchor:self.centerYAnchor].active = YES;
 
 		[_button bind:NSEnabledBinding toObject:self withKeyPath:@"objectValue.readOnly" options:@{ NSValueTransformerNameBindingOption: NSNegateBooleanTransformerName }];
 		[_button bind:NSValueBinding toObject:self withKeyPath:@"objectValue.excluded" options:@{ NSValueTransformerNameBindingOption: NSNegateBooleanTransformerName }];
@@ -141,7 +142,7 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 - (NSAttributedString*)excerptString
 {
 	FFResultNode* item = self.objectValue;
-	NSAttributedString* res = [item excerptWithReplacement:(item.isReadOnly || item.excluded || !_showReplacementPreviews ? item.replaceString : self.replaceString) font:self.textField.font];
+	NSAttributedString* res = [item excerptWithReplacement:(item.isReadOnly || item.excluded || !_showReplacementPreviews ? item.replaceString : (self.replaceString ?: @"")) font:self.textField.font];
 	if(self.backgroundStyle == NSBackgroundStyleDark)
 	{
 		NSMutableAttributedString* str = [res mutableCopy];
@@ -183,7 +184,7 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 		NSButton* countOfLeafs = [NSButton new];
 		[[countOfLeafs cell] setHighlightsBy:NSNoCellMask];
 		countOfLeafs.alignment  = NSTextAlignmentCenter;
-		countOfLeafs.bezelStyle = NSInlineBezelStyle;
+		countOfLeafs.bezelStyle = NSBezelStyleInline;
 		countOfLeafs.font       = [NSFont labelFontOfSize:0];
 		countOfLeafs.identifier = @"countOfLeafs";
 
@@ -196,8 +197,8 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 
 		NSButton* remove = [NSButton new];
 		remove.controlSize = NSControlSizeSmall;
-		remove.bezelStyle  = NSRoundRectBezelStyle;
-		remove.buttonType  = NSMomentaryPushInButton;
+		remove.bezelStyle  = NSBezelStyleRoundRect;
+		remove.buttonType  = NSButtonTypeMomentaryPushIn;
 		remove.image       = removeTemplateImage;
 
 		NSDictionary* views = @{ @"icon": imageView, @"text": textField, @"count": countOfLeafs, @"remove": remove };
@@ -207,14 +208,14 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 		[countOfLeafs setContentCompressionResistancePriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
 
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(9)-[remove(==16)]-(6)-[icon(==16)]-(3)-[text]"          options:NSLayoutFormatAlignAllCenterY metrics:nil views:views]];
-		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[text]-(4)-[count]-(>=8)-|"                                options:NSLayoutFormatAlignAllBaseline metrics:nil views:views]];
+		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[text]-(4)-[count]-(>=8@750)-|"                            options:NSLayoutFormatAlignAllBaseline metrics:nil views:views]];
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:[icon(==16,==remove)]-(3)-|"                               options:0 metrics:nil views:views]];
 
 		[imageView bind:NSValueBinding toObject:self withKeyPath:@"objectValue.document.icon" options:nil];
 		[textField bind:NSValueBinding toObject:self withKeyPath:@"objectValue.displayPath" options:nil];
 
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(outlineViewItemDidExpandCollapse:) name:NSOutlineViewItemDidExpandNotification object:viewController.outlineView];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(outlineViewItemDidExpandCollapse:) name:NSOutlineViewItemDidCollapseNotification object:viewController.outlineView];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(outlineViewItemDidExpandCollapse:) name:NSOutlineViewItemDidExpandNotification object:nil];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(outlineViewItemDidExpandCollapse:) name:NSOutlineViewItemDidCollapseNotification object:nil];
 
 		self.imageView          = imageView;
 		self.textField          = textField;
@@ -226,7 +227,7 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 
 - (void)dealloc
 {
-	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	[NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
 - (void)setShowKeyEquivalent:(BOOL)flag
@@ -281,11 +282,8 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 
 - (void)outlineViewItemDidExpandCollapse:(NSNotification*)aNotification
 {
-	NSOutlineView* outlineView = [aNotification object];
-	NSDictionary* userInfo = [aNotification userInfo];
-	FFResultNode* item = userInfo[@"NSObject"];
-	if(item == self.objectValue)
-		_countOfLeafsButton.hidden = [outlineView isItemExpanded:item];
+	if(self.objectValue == aNotification.userInfo[@"NSObject"])
+		_countOfLeafsButton.hidden = [aNotification.object isItemExpanded:self.objectValue];
 }
 
 - (void)outlineViewItemDidExpand:(NSNotification*)aNotification   { [self outlineViewItemDidExpandCollapse:aNotification]; }
@@ -301,8 +299,8 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 {
 	if(!_scrollView)
 	{
-		NSString* fontName = [[NSUserDefaults standardUserDefaults] stringForKey:kUserDefaultsSearchResultsFontNameKey];
-		CGFloat fontSize   = [[NSUserDefaults standardUserDefaults] floatForKey:kUserDefaultsSearchResultsFontSizeKey] ?: 11.0;
+		NSString* fontName = [NSUserDefaults.standardUserDefaults stringForKey:kUserDefaultsSearchResultsFontNameKey];
+		CGFloat fontSize   = [NSUserDefaults.standardUserDefaults floatForKey:kUserDefaultsSearchResultsFontSizeKey] ?: 11.0;
 		_searchResultsFont = (fontName ? [NSFont fontWithName:fontName size:fontSize] : [NSFont controlContentFontOfSize:fontSize]);
 
 		NSTextField* label = OakCreateLabel(@"m", _searchResultsFont);
@@ -332,43 +330,30 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 		_scrollView.hasVerticalScroller   = YES;
 		_scrollView.hasHorizontalScroller = YES;
 		_scrollView.autohidesScrollers    = YES;
-		_scrollView.borderType            = NSLineBorder;
+		_scrollView.borderType            = NSNoBorder;
 		_scrollView.documentView          = _outlineView;
 
+		NSView* contentView = [[NSView alloc] initWithFrame:NSZeroRect];
+
 		NSDictionary* views = @{
-			@"scrollView": _scrollView,
+			@"topDivider":     OakCreateNSBoxSeparator(),
+			@"scrollView":     _scrollView,
+			@"bottomDividier": OakCreateNSBoxSeparator(),
 		};
 
-		NSView* containerView = [[NSView alloc] initWithFrame:NSZeroRect];
-		OakAddAutoLayoutViewsToSuperview([views allValues], containerView);
+		OakAddAutoLayoutViewsToSuperview(views.allValues, contentView);
+		OakSetupKeyViewLoop(@[ contentView, _outlineView ]);
 
-		[containerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[scrollView]|" options:0 metrics:nil views:views]];
-		[containerView addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(-1)-[scrollView]-(-1)-|" options:0 metrics:nil views:views]];
+		[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|[scrollView]|"                                             options:0                                                            metrics:nil views:views]];
+		[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[topDivider(==1)][scrollView(>=50)][bottomDividier(==1)]|" options:NSLayoutFormatAlignAllLeading|NSLayoutFormatAlignAllTrailing metrics:nil views:views]];
 
-		self.view = containerView;
+		self.view = contentView;
 
 		_outlineView.dataSource   = self;
 		_outlineView.delegate     = self;
 		_outlineView.target       = self;
 		_outlineView.action       = @selector(didSingleClick:);
 		_outlineView.doubleAction = @selector(didDoubleClick:);
-
-		_eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged handler:^NSEvent*(NSEvent* event){
-			NSUInteger modifierFlags = [_outlineView.window isKeyWindow] ? ([event modifierFlags] & (NSEventModifierFlagShift|NSEventModifierFlagControl|NSEventModifierFlagOption|NSEventModifierFlagCommand)) : 0;
-			if(_longPressedCommandModifier)
-			{
-				self.showKeyEquivalent = modifierFlags == NSEventModifierFlagCommand;
-				if(modifierFlags == 0)
-					_longPressedCommandModifier = NO;
-			}
-			else
-			{
-				if(modifierFlags == NSEventModifierFlagCommand)
-						[self performSelector:@selector(delayedLongPressedCommandModifier:) withObject:self afterDelay:0.2];
-				else	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedLongPressedCommandModifier:) object:self];
-			}
-			return event;
-		}];
 	}
 }
 
@@ -378,9 +363,30 @@ static FFResultNode* PreviousNode (FFResultNode* node)
 	self.showKeyEquivalent = YES;
 }
 
-- (void)dealloc
+- (void)viewDidAppear
+{
+	_eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged handler:^NSEvent*(NSEvent* event){
+		NSUInteger modifierFlags = _outlineView.window.isKeyWindow ? (event.modifierFlags & (NSEventModifierFlagShift|NSEventModifierFlagControl|NSEventModifierFlagOption|NSEventModifierFlagCommand)) : 0;
+		if(_longPressedCommandModifier)
+		{
+			self.showKeyEquivalent = modifierFlags == NSEventModifierFlagCommand;
+			if(modifierFlags == 0)
+				_longPressedCommandModifier = NO;
+		}
+		else
+		{
+			if(modifierFlags == NSEventModifierFlagCommand)
+					[self performSelector:@selector(delayedLongPressedCommandModifier:) withObject:self afterDelay:0.2];
+			else	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(delayedLongPressedCommandModifier:) object:self];
+		}
+		return event;
+	}];
+}
+
+- (void)viewWillDisappear
 {
 	[NSEvent removeMonitor:_eventMonitor];
+	_eventMonitor = nil;
 }
 
 - (void)setResults:(FFResultNode*)someResults

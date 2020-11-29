@@ -1,8 +1,6 @@
 #include "buffer.h"
 #include "meta_data.h"
 
-OAK_DEBUG_VAR(Buffer_Parsing);
-
 namespace ng
 {
 	// ===================
@@ -11,7 +9,6 @@ namespace ng
 
 	struct result_t
 	{
-		WATCH_LEAKS(parser::result_t);
 		parse::stack_ptr state;
 		std::map<size_t, scope::scope_t> scopes;
 	};
@@ -40,7 +37,6 @@ namespace ng
 			size_t from    = begin(n);
 			size_t to      = end(n);
 			auto stateIter = from == 0 ? _parser_states.begin() : _parser_states.find(from);
-			D(DBF_Buffer_Parsing, bug("line %zu dirty, offset %zu → %zu-%zu\n", n, _dirty.begin()->first, from, to););
 			if(stateIter != _parser_states.end())
 			{
 				if(batch_start == -1)
@@ -79,7 +75,7 @@ namespace ng
 			}
 			else
 			{
-				fprintf(stderr, "no parser state for %zu-%zu (%p)\n%s\n%s\n", from, to, this, substr(0, size()).c_str(), to_s(*this).c_str());
+				os_log_error(OS_LOG_DEFAULT, "No parser state for %zu-%zu (%p)\n%{public}s\n%{public}s", from, to, this, substr(0, size()).c_str(), to_s(*this).c_str());
 			}
 		}
 	}
@@ -87,8 +83,6 @@ namespace ng
 	void buffer_t::update_scopes (size_t limit_redraw, size_t batch_start, std::pair<size_t, size_t> const& range, std::map<size_t, scope::scope_t> const& newScopes, parse::stack_ptr parserState)
 	{
 		bool atEOF = convert(range.first).line+1 == lines();
-		D(DBF_Buffer_Parsing, bug("did parse %zu-%zu (revision %zu), at EOL %s\n", range.first, range.second, revision(), BSTR(atEOF)););
-
 		_scopes.remove(_scopes.lower_bound(range.first), atEOF ? _scopes.end() : _scopes.lower_bound(range.second));
 		for(auto const& pair : newScopes)
 		{
@@ -142,7 +136,7 @@ namespace ng
 			auto state  = from == 0 ? _parser_states.begin() : _parser_states.find(from);
 			if(state == _parser_states.end())
 			{
-				fprintf(stderr, "*** no parser state for %zu-%zu (%p)\n%s\n", from, to, this, substr(0, size()).c_str());
+				os_log_error(OS_LOG_DEFAULT, "No parser state for %zu-%zu (%p)\n%{public}s", from, to, this, substr(0, size()).c_str());
 				break;
 			}
 

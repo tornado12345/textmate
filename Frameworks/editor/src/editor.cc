@@ -158,7 +158,7 @@ namespace ng
 			for(auto& mark : _marks)
 			{
 				size_t& index = mark.position.index;
-				if(oak::cap(from, index, to) == index)
+				if(std::clamp(index, from, to) == index)
 				{
 					if(mark.type == mark_t::kUnpairedMark || index != from && index != to)
 					{
@@ -290,16 +290,6 @@ namespace ng
 		_selections = ng::sanitize(_buffer, _selections);
 	}
 
-	static std::map<std::string, std::string> create_find_options (std::string const& indent, bool complete, size_t fragments, bool columnar)
-	{
-		std::map<std::string, std::string> res;
-		if(indent != NULL_STR) res["indent"]    = indent;
-		if(complete)           res["complete"]  = "1";
-		if(fragments > 1)      res["fragments"] = std::to_string(fragments);
-		if(columnar)           res["columnar"]  = "1";
-		return res;
-	}
-
 	clipboard_t::entry_ptr editor_t::copy (ng::buffer_t const& buffer, ng::ranges_t const& selections)
 	{
 		std::string indent = NULL_STR;
@@ -329,7 +319,7 @@ namespace ng
 		for(auto const& range : dissect_columnar(buffer, selections))
 			v.push_back(buffer.substr(range.min().index, range.max().index));
 		bool columnar = selections.size() == 1 && selections.last().columnar;
-		return std::make_shared<clipboard_t::entry_t>(text::join(v, "\n"), create_find_options(indent, complete, v.size(), columnar));
+		return std::make_shared<clipboard_t::entry_t>(v, indent, complete, columnar);
 	}
 
 	static bool suitable_for_reindent (std::string const& str)
@@ -451,19 +441,20 @@ namespace ng
 		if(!entry)
 			return selections;
 
-		std::string str                            = entry->content();
-		std::map<std::string, std::string> options = entry->options();
+		std::vector<std::string> strings = entry->contents();
+		size_t const fragments           = strings.size();
+		std::string str                  = fragments == 1 ? strings.back() : entry->content();
 		str.erase(text::convert_line_endings(str.begin(), str.end(), text::estimate_line_endings(str.begin(), str.end())), str.end());
 
-		std::string const& indent = options["indent"];
-		bool const complete       = options["complete"] == "1";
-		size_t const fragments    = strtol(options["fragments"].c_str(), nullptr, 10);
-		bool const columnar       = options["columnar"] == "1";
+		std::map<std::string, std::string> options = entry->options();
+		std::string const& indent = options[kClipboardOptionIndent];
+		bool const complete       = options[kClipboardOptionComplete] == "1";
+		bool const columnar       = options[kClipboardOptionColumnar] == "1";
 
 		if((selections.size() != 1 || selections.last().columnar) && (fragments > 1 || oak::contains(str.begin(), str.end(), '\n')))
 		{
-			std::vector<std::string> words = text::split(str, "\n");
-			if(words.size() > 1 && words.back().empty())
+			std::vector<std::string> words = fragments == 1 ? text::split(str, "\n") : strings;
+			if(fragments == 1 && words.size() > 1 && words.back().empty())
 				words.pop_back();
 
 			size_t i = 0;
@@ -475,7 +466,6 @@ namespace ng
 
 		if(fragments > 1 && selections.size() == 1)
 		{
-			ASSERT_EQ(fragments, std::count(str.begin(), str.end(), '\n') + 1);
 			if(columnar)
 			{
 				index_t caret = dissect_columnar(buffer, selections).last().min();
@@ -483,7 +473,7 @@ namespace ng
 				size_t col    = visual_distance(buffer, buffer.begin(n), caret);
 
 				std::multimap<range_t, std::string> insertions;
-				for(auto const& line : text::tokenize(str.begin(), str.end(), '\n'))
+				for(auto const& line : strings)
 				{
 					if(n+1 < buffer.lines())
 					{
@@ -507,7 +497,7 @@ namespace ng
 			{
 				std::multimap<range_t, std::string> insertions;
 				ng::range_t caret = dissect_columnar(buffer, selections).last();
-				for(auto const& line : text::tokenize(str.begin(), str.end(), '\n'))
+				for(auto const& line : strings)
 				{
 					insertions.emplace(caret, line);
 					caret = caret.max();
@@ -948,9 +938,9 @@ namespace ng
 					if(clipboard_t::entry_ptr oldEntry = yank_clipboard()->current())
 					{
 						if(action == kAppendSelectionToYankPboard)
-							entry = std::make_shared<clipboard_t::entry_t>(oldEntry->content() + entry->content(), create_find_options("", false, 1, false));
+							entry = std::make_shared<clipboard_t::entry_t>(oldEntry->content() + entry->content());
 						else if(action == kPrependSelectionToYankPboard)
-							entry = std::make_shared<clipboard_t::entry_t>(entry->content() + oldEntry->content(), create_find_options("", false, 1, false));
+							entry = std::make_shared<clipboard_t::entry_t>(entry->content() + oldEntry->content());
 					}
 				}
 				yank_clipboard()->push_back(entry);
@@ -1199,10 +1189,7 @@ namespace ng
 	{
 		std::multimap<range_t, std::string> tmp;
 		for(auto pair : replacements)
-		{
-			// D(DBF_Editor, bug("replace range %zu-%zu with ‘%s’\n", pair->first.first, pair->first.second, pair->second.c_str()););
 			tmp.emplace(range_t(pair.first.first, pair.first.second), pair.second);
-		}
 
 		if(!tmp.empty())
 		{
@@ -1311,7 +1298,7 @@ namespace ng
 			int line        = pos.line;
 			int col         = visual_distance(_buffer, _buffer.begin(line), pair.first, false);
 
-			line = oak::cap(0, line + deltaY, int(_buffer.lines()-1));
+			line = std::clamp(line + deltaY, 0, int(_buffer.lines()-1));
 			col  = std::max(col + deltaX, 0);
 			replacements.emplace(visual_advance(_buffer, _buffer.begin(line), col, false), pair.second);
 		}

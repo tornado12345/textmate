@@ -16,6 +16,7 @@
 #import <OakAppKit/OakPasteboard.h>
 #import <OakAppKit/OakSubmenuController.h>
 #import <OakFilterList/BundleItemChooser.h>
+#import <OakFoundation/OakFoundation.h>
 #import <OakFoundation/NSString Additions.h>
 #import <OakTextView/OakDocumentView.h>
 #import <MenuBuilder/MenuBuilder.h>
@@ -33,12 +34,9 @@
 #import <license/LicenseManager.h>
 #import <settings/settings.h>
 #import <oak/debug.h>
-#import <oak/compat.h>
 #import <oak/oak.h>
 #import <scm/scm.h>
 #import <text/types.h>
-
-OAK_DEBUG_VAR(AppController);
 
 void OakOpenDocuments (NSArray* paths, BOOL treatFilePackageAsFolder)
 {
@@ -60,7 +58,7 @@ void OakOpenDocuments (NSArray* paths, BOOL treatFilePackageAsFolder)
 		{
 			[plugInsToInstall addObject:path];
 		}
-		else if([[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDirectory] && isDirectory)
+		else if([NSFileManager.defaultManager fileExistsAtPath:path isDirectory:&isDirectory] && isDirectory)
 		{
 			[OakDocumentController.sharedInstance showFileBrowserAtPath:path];
 		}
@@ -71,10 +69,10 @@ void OakOpenDocuments (NSArray* paths, BOOL treatFilePackageAsFolder)
 	}
 
 	if([itemsToInstall count])
-		[[BundlesManager sharedInstance] installBundleItemsAtPaths:itemsToInstall];
+		[BundlesManager.sharedInstance installBundleItemsAtPaths:itemsToInstall];
 
 	for(NSString* path in plugInsToInstall)
-		[[TMPlugInController sharedInstance] installPlugInAtPath:path];
+		[TMPlugInController.sharedInstance installPlugInAtPath:path];
 
 	[OakDocumentController.sharedInstance showDocuments:documents];
 }
@@ -89,9 +87,9 @@ BOOL HasDocumentWindow (NSArray* windows)
 	return NO;
 }
 
-@interface AppController ()
+@interface AppController () <OakUserDefaultsObserver>
 @property (nonatomic) BOOL didFinishLaunching;
-@property (nonatomic) BOOL currentResponderIsOakTextView;
+@property (nonatomic) BOOL keyWindowHasBackAndForwardActions;
 @end
 
 @implementation AppController
@@ -188,9 +186,9 @@ BOOL HasDocumentWindow (NSArray* windows)
 				},
 				{ @"Find",
 					.submenu = {
-						{ @"Find and Replace…",           @selector(orderFrontFindPanel:),          @"f", .tag = 1 },
-						{ @"Find in Project…",            @selector(orderFrontFindPanel:),          @"F", .tag = 3 },
-						{ @"Find in Folder…",             @selector(orderFrontFindPanel:),                .tag = 4 },
+						{ @"Find and Replace…",           @selector(orderFrontFindPanel:),          @"f", .tag = FFSearchTargetDocument },
+						{ @"Find in Project…",            @selector(orderFrontFindPanel:),          @"F", .tag = FFSearchTargetProject  },
+						{ @"Find in Folder…",             @selector(orderFrontFindPanel:),                .tag = FFSearchTargetOther    },
 						{ /* -------- */ },
 						{ @"Show Find History",           @selector(showFindHistory:),              @"f", .modifierFlags = NSEventModifierFlagCommand|NSEventModifierFlagOption|NSEventModifierFlagControl },
 						{ /* -------- */ },
@@ -296,6 +294,8 @@ BOOL HasDocumentWindow (NSArray* windows)
 				{ /* -------- */ },
 				{ @"View Source",            @selector(viewSource:),           @"u", .modifierFlags = NSEventModifierFlagCommand|NSEventModifierFlagOption },
 				{ @"Enter Full Screen",      @selector(toggleFullScreen:),     @"f", .modifierFlags = NSEventModifierFlagCommand|NSEventModifierFlagControl },
+				{ /* -------- */ },
+				{ @"Customize Touch Bar…",   @selector(toggleTouchBarCustomizationPalette:) },
 			}
 		},
 		{ @"Navigate",
@@ -309,8 +309,8 @@ BOOL HasDocumentWindow (NSArray* windows)
 				{ @"Jump to Previous Bookmark",  @selector(goToPreviousBookmark:),         .key = NSF2FunctionKey, .modifierFlags = NSEventModifierFlagShift },
 				{ @"Jump to Bookmark",           .delegate = OakSubmenuController.sharedInstance },
 				{ /* -------- */ },
-				{ @"Jump To Next Mark",          @selector(jumpToNextMark:),               .key = NSF3FunctionKey, .modifierFlags = 0 },
-				{ @"Jump To Previous Mark",      @selector(jumpToPreviousMark:),           .key = NSF3FunctionKey, .modifierFlags = NSEventModifierFlagShift },
+				{ @"Jump to Next Mark",          @selector(jumpToNextMark:),               .key = NSF3FunctionKey, .modifierFlags = 0 },
+				{ @"Jump to Previous Mark",      @selector(jumpToPreviousMark:),           .key = NSF3FunctionKey, .modifierFlags = NSEventModifierFlagShift },
 				{ /* -------- */ },
 				{ @"Scroll",
 					.submenu = {
@@ -430,106 +430,82 @@ BOOL HasDocumentWindow (NSArray* windows)
 	return MBCreateMenu(items);
 }
 
-- (void)setCurrentResponderIsOakTextView:(BOOL)flag
+- (void)setKeyWindowHasBackAndForwardActions:(BOOL)flag
 {
-	if(_currentResponderIsOakTextView != flag)
-	{
-		_currentResponderIsOakTextView = flag;
+	if(_keyWindowHasBackAndForwardActions == flag)
+		return;
+	_keyWindowHasBackAndForwardActions = flag;
 
-		NSMenu* mainMenu = [NSApp mainMenu];
-		NSMenu* goMenu   = [[mainMenu itemWithTitle:@"File Browser"] submenu];
-		NSMenu* textMenu = [[mainMenu itemWithTitle:@"Text"] submenu];
+	NSMenu* textMenu        = [NSApp.mainMenu itemWithTitle:@"Text"].submenu;
+	NSMenu* fileBrowserMenu = [NSApp.mainMenu itemWithTitle:@"File Browser"].submenu;
 
-		NSMenuItem* backMenuItem       = [goMenu itemWithTitle:@"Back"];
-		NSMenuItem* forwardMenuItem    = [goMenu itemWithTitle:@"Forward"];
-		NSMenuItem* shiftLeftMenuItem  = [textMenu itemWithTitle:@"Shift Left"];
-		NSMenuItem* shiftRightMenuItem = [textMenu itemWithTitle:@"Shift Right"];
+	auto itemWithAction = ^NSMenuItem*(NSMenu* menu, SEL action){
+		NSInteger index = [menu indexOfItemWithTarget:nil andAction:action];
+		return index == -1 ? nil : menu.itemArray[index];
+	};
 
-		if(!backMenuItem || !forwardMenuItem || !shiftLeftMenuItem || !shiftRightMenuItem)
-			return;
+	NSMenuItem* backMenuItem       = itemWithAction(fileBrowserMenu, @selector(goBack:));
+	NSMenuItem* forwardMenuItem    = itemWithAction(fileBrowserMenu, @selector(goForward:));
+	NSMenuItem* shiftLeftMenuItem  = itemWithAction(textMenu,        @selector(shiftLeft:));
+	NSMenuItem* shiftRightMenuItem = itemWithAction(textMenu,        @selector(shiftRight:));
 
-		if(_currentResponderIsOakTextView)
-		{
-			backMenuItem.keyEquivalent                   = @"";
-			forwardMenuItem.keyEquivalent                = @"";
+	if(!backMenuItem || !forwardMenuItem || !shiftLeftMenuItem || !shiftRightMenuItem)
+		return;
 
-			shiftLeftMenuItem.keyEquivalent              = @"[";
-			shiftLeftMenuItem.keyEquivalentModifierMask  = NSEventModifierFlagCommand;
-			shiftRightMenuItem.keyEquivalent             = @"]";
-			shiftRightMenuItem.keyEquivalentModifierMask = NSEventModifierFlagCommand;
-		}
-		else
-		{
-			shiftLeftMenuItem.keyEquivalent           = @"";
-			shiftRightMenuItem.keyEquivalent          = @"";
+	for(NSMenuItem* menuItem in @[ backMenuItem, forwardMenuItem, shiftLeftMenuItem, shiftRightMenuItem ])
+		menuItem.keyEquivalent = @"";
 
-			backMenuItem.keyEquivalent                = @"[";
-			backMenuItem.keyEquivalentModifierMask    = NSEventModifierFlagCommand;
-			forwardMenuItem.keyEquivalent             = @"]";
-			forwardMenuItem.keyEquivalentModifierMask = NSEventModifierFlagCommand;
-		}
-	}
+	(flag ? backMenuItem : shiftLeftMenuItem).keyEquivalent                 = @"[";
+	(flag ? backMenuItem : shiftLeftMenuItem).keyEquivalentModifierMask     = NSEventModifierFlagCommand;
+	(flag ? forwardMenuItem : shiftRightMenuItem).keyEquivalent             = @"]";
+	(flag ? forwardMenuItem : shiftRightMenuItem).keyEquivalentModifierMask = NSEventModifierFlagCommand;
 }
 
 - (void)applicationDidUpdate:(NSNotification*)aNotification
 {
-	self.currentResponderIsOakTextView = [NSApp targetForAction:@selector(shiftLeft:) to:nil from:self] != nil;
+	BOOL foundBackAndForwardActions = NO;
+	for(NSResponder* responder = NSApp.keyWindow.firstResponder; responder && !foundBackAndForwardActions; responder = responder.nextResponder)
+	{
+		if([responder respondsToSelector:@selector(shiftLeft:)])
+			break;
+		else if([responder respondsToSelector:@selector(goBack:)])
+			foundBackAndForwardActions = YES;
+	}
+	self.keyWindowHasBackAndForwardActions = foundBackAndForwardActions;
 }
 
 - (void)userDefaultsDidChange:(id)sender
 {
-	BOOL disableRmate        = [[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsDisableRMateServerKey];
-	NSString* rmateInterface = [[NSUserDefaults standardUserDefaults] stringForKey:kUserDefaultsRMateServerListenKey];
-	int rmatePort            = [[NSUserDefaults standardUserDefaults] integerForKey:kUserDefaultsRMateServerPortKey];
+	BOOL disableRmate        = [NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsDisableRMateServerKey];
+	NSString* rmateInterface = [NSUserDefaults.standardUserDefaults stringForKey:kUserDefaultsRMateServerListenKey];
+	int rmatePort            = [NSUserDefaults.standardUserDefaults integerForKey:kUserDefaultsRMateServerPortKey];
 	setup_rmate_server(!disableRmate, rmatePort, [rmateInterface isEqualToString:kRMateServerListenRemote]);
 }
 
 - (void)applicationWillFinishLaunching:(NSNotification*)aNotification
 {
-	D(DBF_AppController, bug("\n"););
 	if(NSMenu* menu = [self mainMenu])
 		NSApp.mainMenu = menu;
 
-	SoftwareUpdate* swUpdate = [SoftwareUpdate sharedInstance];
-	NSString* parms = [NSString stringWithFormat:@"v=%@&os=%zu.%zu.%zu", [[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding], oak::os_major(), oak::os_minor(), oak::os_patch()];
-	[swUpdate setSignee:key_chain_t::key_t("org.textmate.duff", "Allan Odgaard", "-----BEGIN PUBLIC KEY-----\nMIIBtjCCASsGByqGSM44BAEwggEeAoGBAPIE9PpXPK3y2eBDJ0dnR/D8xR1TiT9m\n8DnPXYqkxwlqmjSShmJEmxYycnbliv2JpojYF4ikBUPJPuerlZfOvUBC99ERAgz7\nN1HYHfzFIxVo1oTKWurFJ1OOOsfg8AQDBDHnKpS1VnwVoDuvO05gK8jjQs9E5LcH\ne/opThzSrI7/AhUAy02E9H7EOwRyRNLofdtPxpa10o0CgYBKDfcBscidAoH4pkHR\nIOEGTCYl3G2Pd1yrblCp0nCCUEBCnvmrWVSXUTVa2/AyOZUTN9uZSC/Kq9XYgqwj\nhgzqa8h/a8yD+ao4q8WovwGeb6Iso3WlPl8waz6EAPR/nlUTnJ4jzr9t6iSH9owS\nvAmWrgeboia0CI2AH++liCDvigOBhAACgYAFWO66xFvmF2tVIB+4E7CwhrSi2uIk\ndeBrpmNcZZ+AVFy1RXJelNe/cZ1aXBYskn/57xigklpkfHR6DGqpEbm6KC/47Jfy\ny5GEx+F/eBWEePi90XnLinytjmXRmS2FNqX6D15XNG1xJfjociA8bzC7s4gfeTUd\nlpQkBq2z71yitA==\n-----END PUBLIC KEY-----\n")];
-	[swUpdate setChannels:@{
-		kSoftwareUpdateChannelRelease:    [NSURL URLWithString:[NSString stringWithFormat:@"%s/releases/release?%@", REST_API, parms]],
-		kSoftwareUpdateChannelPrerelease: [NSURL URLWithString:[NSString stringWithFormat:@"%s/releases/beta?%@", REST_API, parms]],
-		kSoftwareUpdateChannelCanary:     [NSURL URLWithString:[NSString stringWithFormat:@"%s/releases/nightly?%@", REST_API, parms]],
-	}];
+	NSOperatingSystemVersion osVersion = NSProcessInfo.processInfo.operatingSystemVersion;
+	NSString* parms = [NSString stringWithFormat:@"v=%@&os=%ld.%ld.%ld", [[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet], osVersion.majorVersion, osVersion.minorVersion, osVersion.patchVersion];
+
+	SoftwareUpdate.sharedInstance.channels = @{
+		kSoftwareUpdateChannelRelease:    [NSURL URLWithString:[NSString stringWithFormat:@"" REST_API "/releases/release?%@", parms]],
+		kSoftwareUpdateChannelPrerelease: [NSURL URLWithString:[NSString stringWithFormat:@"" REST_API "/releases/beta?%@", parms]],
+		kSoftwareUpdateChannelCanary:     [NSURL URLWithString:[NSString stringWithFormat:@"" REST_API "/releases/nightly?%@", parms]],
+	};
 
 	settings_t::set_default_settings_path([[[NSBundle mainBundle] pathForResource:@"Default" ofType:@"tmProperties"] fileSystemRepresentation]);
 	settings_t::set_global_settings_path(path::join(path::home(), "Library/Application Support/TextMate/Global.tmProperties"));
 
-	// LEGACY location used prior to 2.0-alpha.9513
-	std::string const src = path::join(path::home(), "Library/Application Support/TextMate/project-state.db");
-	std::string const dst = path::join(path::home(), "Library/Application Support/TextMate/RecentProjects.db");
-	if(path::exists(src) && !path::exists(dst))
-		rename(src.c_str(), dst.c_str());
-
-	[[NSUserDefaults standardUserDefaults] registerDefaults:@{
+	[NSUserDefaults.standardUserDefaults registerDefaults:@{
 		@"NSRecentDocumentsLimit": @25,
 		@"WebKitDeveloperExtras":  @YES,
 	}];
 	RegisterDefaults();
 
-	// LEGACY format used prior to 2.0-beta.12.23
-	if(NSDictionary* volumeSettings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"volumeSettings"])
-	{
-		for(NSString* pathPrefix in volumeSettings)
-		{
-			id setting = volumeSettings[pathPrefix][@"extendedAttributes"];
-			if(setting && [setting boolValue] == NO)
-			{
-				std::string const glob = path::glob_t::escape(to_s(pathPrefix)) + "**";
-				settings_t::set(kSettingsDisableExtendedAttributesKey, true, NULL_STR, glob);
-			}
-		}
-		[[NSUserDefaults standardUserDefaults] removeObjectForKey:@"volumeSettings"];
-	}
-
-	[[TMPlugInController sharedInstance] loadAllPlugIns:nil];
+	[TMPlugInController.sharedInstance loadAllPlugIns:nil];
 
 	std::string dest = path::join(path::home(), "Library/Application Support/TextMate/Managed");
 	if(!path::exists(dest))
@@ -550,7 +526,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 					{
 						if(write(tbz.input_fd(), buf, len) != len)
 						{
-							fprintf(stderr, "*** error writing bytes to tar\n");
+							os_log_error(OS_LOG_DEFAULT, "Failed writing bytes to tar");
 							break;
 						}
 					}
@@ -559,21 +535,21 @@ BOOL HasDocumentWindow (NSArray* windows)
 
 				std::string output, error;
 				if(!tbz.wait_for_tbz(&output, &error))
-					fprintf(stderr, "%s: %s%s\n", getprogname(), output.c_str(), error.c_str());
+					os_log_error(OS_LOG_DEFAULT, "tar: %{public}s%{public}s", output.c_str(), error.c_str());
 			}
 			else
 			{
-				fprintf(stderr, "%s: unable to launch tar\n", getprogname());
+				os_log_error(OS_LOG_DEFAULT, "Unable to launch tar");
 			}
 		}
 		else
 		{
-			fprintf(stderr, "%s: no ‘DefaultBundles.tbz’ in TextMate.app\n", getprogname());
+			os_log_error(OS_LOG_DEFAULT, "No ‘DefaultBundles.tbz’ in TextMate.app");
 		}
 	}
-	[[BundlesManager sharedInstance] loadBundlesIndex];
+	[BundlesManager.sharedInstance loadBundlesIndex];
 
-	if(BOOL restoreSession = ![[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsDisableSessionRestoreKey])
+	if(BOOL restoreSession = ![NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsDisableSessionRestoreKey])
 	{
 		std::string const prematureTerminationDuringRestore = path::join(path::temp(), "textmate_session_restore");
 
@@ -604,24 +580,20 @@ BOOL HasDocumentWindow (NSArray* windows)
 
 - (BOOL)applicationShouldOpenUntitledFile:(NSApplication*)anApplication
 {
-	D(DBF_AppController, bug("\n"););
 	return self.didFinishLaunching;
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)aNotification
 {
-	D(DBF_AppController, bug("\n"););
-
-	if([NSWindow respondsToSelector:@selector(setAllowsAutomaticWindowTabbing:)]) // MAC_OS_X_VERSION_10_12
-		NSWindow.allowsAutomaticWindowTabbing = NO;
+	NSWindow.allowsAutomaticWindowTabbing = NO;
 
 	if([NSApp respondsToSelector:@selector(setAutomaticCustomizeTouchBarMenuItemEnabled)]) // MAC_OS_X_VERSION_10_12_1
 		NSApp.automaticCustomizeTouchBarMenuItemEnabled = YES;
 
 	if(!HasDocumentWindow([NSApp orderedWindows]))
 	{
-		BOOL disableUntitledAtStartupPrefs = [[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsDisableNewDocumentAtStartupKey];
-		BOOL showFavoritesInsteadPrefs     = [[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsShowFavoritesInsteadOfUntitledKey];
+		BOOL disableUntitledAtStartupPrefs = [NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsDisableNewDocumentAtStartupKey];
+		BOOL showFavoritesInsteadPrefs     = [NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsShowFavoritesInsteadOfUntitledKey];
 
 		if(showFavoritesInsteadPrefs)
 			[self openFavorites:self];
@@ -630,7 +602,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 	}
 
 	[self userDefaultsDidChange:nil]; // setup mate/rmate server
-	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(userDefaultsDidChange:) name:NSUserDefaultsDidChangeNotification object:[NSUserDefaults standardUserDefaults]];
+	OakObserveUserDefaults(self);
 
 	NSMenu* selectMenu = [[[[[NSApp mainMenu] itemWithTitle:@"Edit"] submenu] itemWithTitle:@"Select"] submenu];
 	[[selectMenu itemWithTitle:@"Toggle Column Selection"] setActivationString:@"⌥" withFont:nil];
@@ -638,8 +610,8 @@ BOOL HasDocumentWindow (NSArray* windows)
 	[TerminalPreferences updateMateIfRequired];
 	[AboutWindowController showChangesIfUpdated];
 
-	[[CrashReporter sharedInstance] applicationDidFinishLaunching:aNotification];
-	[[CrashReporter sharedInstance] postNewCrashReportsToURLString:[NSString stringWithFormat:@"%s/crashes", REST_API]];
+	[CrashReporter.sharedInstance applicationDidFinishLaunching:aNotification];
+	[CrashReporter.sharedInstance postNewCrashReportsToURLString:[NSString stringWithFormat:@"%s/crashes", REST_API]];
 
 	[OakCommitWindowServer sharedInstance]; // Setup server
 
@@ -654,6 +626,41 @@ BOOL HasDocumentWindow (NSArray* windows)
 - (void)applicationWillBecomeActive:(NSNotification*)aNotification
 {
 	scm::enable();
+}
+
+- (void)applicationDidResignActive:(NSNotification*)aNotification
+{
+	// If the window to activate, when switching back to TextMate, has “Move to
+	// Active Space” set, then the system will move this window to the current
+	// space. This is not what we want for auxillary windows like the Find dialog
+	// or HTML output, as these windows are tied to a document window.
+	//
+	// Starting with macOS 10.11 we have to change collection behavior after the
+	// current event loop cycle, both when receiving the did become and did resign
+	// active notification.
+
+	dispatch_async(dispatch_get_main_queue(), ^{
+		NSMutableArray* changedWindows = [NSMutableArray array];
+		for(NSWindow* window in NSApp.windows)
+		{
+			if((window.collectionBehavior & (NSWindowCollectionBehaviorMoveToActiveSpace|NSWindowCollectionBehaviorFullScreenAuxiliary)) == (NSWindowCollectionBehaviorMoveToActiveSpace|NSWindowCollectionBehaviorFullScreenAuxiliary))
+			{
+				window.collectionBehavior &= ~NSWindowCollectionBehaviorMoveToActiveSpace;
+				[changedWindows addObject:window];
+			}
+		}
+
+		if(changedWindows.count)
+		{
+			__weak __block id token = [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationDidBecomeActiveNotification object:NSApp queue:nil usingBlock:^(NSNotification*){
+				[NSNotificationCenter.defaultCenter removeObserver:token];
+				dispatch_async(dispatch_get_main_queue(), ^{
+					for(NSWindow* window in changedWindows)
+						window.collectionBehavior |= NSWindowCollectionBehaviorMoveToActiveSpace;
+				});
+			}];
+		}
+	});
 }
 
 // =========================
@@ -674,27 +681,25 @@ BOOL HasDocumentWindow (NSArray* windows)
 
 - (IBAction)orderFrontAboutPanel:(id)sender
 {
-	[[AboutWindowController sharedInstance] showAboutWindow:self];
+	[AboutWindowController.sharedInstance showAboutWindow:self];
 }
 
 - (IBAction)orderFrontFindPanel:(id)sender
 {
-	D(DBF_AppController, bug("\n"););
-	Find* find = [Find sharedInstance];
-	NSInteger mode = [sender respondsToSelector:@selector(tag)] ? [sender tag] : find_tags::in_document;
+	Find* find = Find.sharedInstance;
+	NSInteger mode = [sender respondsToSelector:@selector(tag)] ? [sender tag] : FFSearchTargetDocument;
 	switch(mode)
 	{
-		case find_tags::in_document:  find.searchTarget = FFSearchTargetDocument;  break;
-		case find_tags::in_selection: find.searchTarget = FFSearchTargetSelection; break;
-		case find_tags::in_project:   find.searchTarget = FFSearchTargetProject;   break;
-		case find_tags::in_folder:    return [find showFolderSelectionPanel:self]; break;
+		case FFSearchTargetDocument:  find.searchTarget = FFSearchTargetDocument;  break;
+		case FFSearchTargetSelection: find.searchTarget = FFSearchTargetSelection; break;
+		case FFSearchTargetProject:   find.searchTarget = FFSearchTargetProject;   break;
+		case FFSearchTargetOther:     return [find showFolderSelectionPanel:self]; break;
 	}
 	[find showWindow:self];
 }
 
 - (IBAction)orderFrontGoToLinePanel:(id)sender;
 {
-	D(DBF_AppController, bug("\n"););
 	if(id textView = [NSApp targetForAction:@selector(selectionString)])
 		[goToLineTextField setStringValue:[textView selectionString]];
 	[goToLinePanel makeKeyAndOrderFront:self];
@@ -702,31 +707,28 @@ BOOL HasDocumentWindow (NSArray* windows)
 
 - (IBAction)performGoToLine:(id)sender
 {
-	D(DBF_AppController, bug("\n"););
 	[goToLinePanel orderOut:self];
 	[NSApp sendAction:@selector(selectAndCenter:) to:nil from:[goToLineTextField stringValue]];
 }
 
 - (IBAction)performSoftwareUpdateCheck:(id)sender
 {
-	[[SoftwareUpdate sharedInstance] checkForUpdates:self];
+	[SoftwareUpdate.sharedInstance checkForUpdate:self];
 }
 
 - (IBAction)showPreferences:(id)sender
 {
-	D(DBF_AppController, bug("\n"););
-	[[Preferences sharedInstance] showWindow:self];
+	[Preferences.sharedInstance showWindow:self];
 }
 
 - (IBAction)showBundleEditor:(id)sender
 {
-	D(DBF_AppController, bug("\n"););
-	[[BundleEditor sharedInstance] showWindow:self];
+	[BundleEditor.sharedInstance showWindow:self];
 }
 
 - (IBAction)openFavorites:(id)sender
 {
-	FavoriteChooser* chooser = [FavoriteChooser sharedInstance];
+	FavoriteChooser* chooser = FavoriteChooser.sharedInstance;
 	chooser.action = @selector(didSelectFavorite:);
 	[chooser showWindow:self];
 }
@@ -735,7 +737,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 {
 	NSMutableArray* paths = [NSMutableArray array];
 	for(id item in [sender selectedItems])
-		[paths addObject:[item objectForKey:@"path"]];
+		[paths addObject:[item valueForKey:@"path"]];
 	OakOpenDocuments(paths, YES);
 }
 
@@ -745,7 +747,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 
 - (IBAction)showBundleItemChooser:(id)sender
 {
-	BundleItemChooser* chooser = [BundleItemChooser sharedInstance];
+	BundleItemChooser* chooser = BundleItemChooser.sharedInstance;
 	chooser.action     = @selector(bundleItemChooserDidSelectItems:);
 	chooser.editAction = @selector(editBundleItem:);
 
@@ -780,7 +782,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 
 - (IBAction)toggleFindOption:(id)sender
 {
-	[[Find sharedInstance] takeFindOptionToToggleFrom:sender];
+	[Find.sharedInstance takeFindOptionToToggleFrom:sender];
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)item
@@ -789,17 +791,17 @@ BOOL HasDocumentWindow (NSArray* windows)
 	if([item action] == @selector(toggleFindOption:))
 	{
 		BOOL active = NO;
-		if(OakPasteboardEntry* entry = [[OakPasteboard pasteboardWithName:NSFindPboard] current])
+		if(OakPasteboardEntry* entry = [OakPasteboard.findPasteboard current])
 		{
 			switch([item tag])
 			{
-				case find::ignore_case:        active = [[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsFindIgnoreCase]; break;
+				case find::ignore_case:        active = [NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsFindIgnoreCase]; break;
 				case find::regular_expression: active = [entry regularExpression]; break;
 				case find::full_words:         active = [entry fullWordMatch];     enabled = ![entry regularExpression]; break;
 				case find::ignore_whitespace:  active = [entry ignoreWhitespace];  enabled = ![entry regularExpression]; break;
-				case find::wrap_around:        active = [[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsFindWrapAround]; break;
+				case find::wrap_around:        active = [NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsFindWrapAround]; break;
 			}
-			[item setState:(active ? NSOnState : NSOffState)];
+			[item setState:(active ? NSControlStateValueOn : NSControlStateValueOff)];
 		}
 		else
 		{
@@ -816,6 +818,10 @@ BOOL HasDocumentWindow (NSArray* windows)
 		if(menuItemValidator != self && [menuItemValidator respondsToSelector:@selector(validateMenuItem:)])
 			enabled = [menuItemValidator validateMenuItem:item];
 	}
+	else
+	{
+		enabled = [self validateThemeMenuItem:item];
+	}
 	return enabled;
 }
 
@@ -826,7 +832,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 
 	if(NSString* uuid = [[[sender selectedItems] lastObject] valueForKey:@"uuid"])
 	{
-		[[BundleEditor sharedInstance] revealBundleItem:bundles::lookup(to_s(uuid))];
+		[BundleEditor.sharedInstance revealBundleItem:bundles::lookup(to_s(uuid))];
 	}
 	else if(NSString* path = [[[sender selectedItems] lastObject] valueForKey:@"file"])
 	{
@@ -838,7 +844,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 
 - (void)editBundleItemWithUUIDString:(NSString*)uuidString
 {
-	[[BundleEditor sharedInstance] revealBundleItem:bundles::lookup(to_s(uuidString))];
+	[BundleEditor.sharedInstance revealBundleItem:bundles::lookup(to_s(uuidString))];
 }
 
 // ============

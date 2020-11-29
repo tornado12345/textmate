@@ -124,17 +124,17 @@ void InstallBundleItems (NSArray* itemPaths)
 					if(path::copy(info.path, installPath))
 					{
 						pathsToReload.insert(installDir);
-						fprintf(stderr, "installed bundle at: %s\n", installPath.c_str());
+						os_log(OS_LOG_DEFAULT, "Installed bundle at: %{public}s", installPath.c_str());
 						continue;
 					}
 				}
-				fprintf(stderr, "failed to install bundle: %s\n", info.path.c_str());
+				os_log_error(OS_LOG_DEFAULT, "Failed to install bundle: %{public}s", info.path.c_str());
 			}
 		}
 		else
 		{
 			bundles::item_ptr bundle;
-			if([[BundlesManager sharedInstance] findBundleForInstall:&bundle])
+			if([BundlesManager.sharedInstance findBundleForInstall:&bundle])
 			{
 				static struct { std::string extension; std::string directory; } DirectoryMap[] =
 				{
@@ -163,11 +163,11 @@ void InstallBundleItems (NSArray* itemPaths)
 								dest = path::unique(dest);
 								if(path::copy(info.path, dest))
 										break;
-								else	fprintf(stderr, "error: copy(‘%s’, ‘%s’)\n", info.path.c_str(), dest.c_str());
+								else	os_log_error(OS_LOG_DEFAULT, "error: copy(‘%{public}s’, ‘%{public}s’)", info.path.c_str(), dest.c_str());
 							}
 							else
 							{
-								fprintf(stderr, "error: makedir(‘%s’)\n", dest.c_str());
+								os_log_error(OS_LOG_DEFAULT, "error: makedir(‘%{public}s’)", dest.c_str());
 							}
 						}
 					}
@@ -177,5 +177,5 @@ void InstallBundleItems (NSArray* itemPaths)
 	}
 
 	for(auto path : pathsToReload)
-		[[BundlesManager sharedInstance] reloadPath:[NSString stringWithCxxString:path]];
+		[BundlesManager.sharedInstance reloadPath:[NSString stringWithCxxString:path]];
 }

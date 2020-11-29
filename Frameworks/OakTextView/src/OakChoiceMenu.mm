@@ -33,55 +33,41 @@ enum action_t { kActionNop, kActionTab, kActionReturn, kActionCancel, kActionMov
 
 		_tableView = [[NSTableView alloc] initWithFrame:NSZeroRect];
 		[_tableView addTableColumn:[[NSTableColumn alloc] initWithIdentifier:@"mainColumn"]];
-		_tableView.headerView                         = nil;
-		_tableView.focusRingType                      = NSFocusRingTypeNone;
-		_tableView.autoresizingMask                   = NSViewWidthSizable|NSViewHeightSizable;
-		_tableView.allowsMultipleSelection            = YES;
-		_tableView.dataSource                         = self;
-		_tableView.delegate                           = self;
+		_tableView.headerView              = nil;
+		_tableView.focusRingType           = NSFocusRingTypeNone;
+		_tableView.autoresizingMask        = NSViewWidthSizable|NSViewHeightSizable;
+		_tableView.allowsMultipleSelection = YES;
+		_tableView.dataSource              = self;
+		_tableView.delegate                = self;
+		_tableView.backgroundColor         = NSColor.clearColor;
 		[_tableView reloadData];
 
-		NSScrollView* scrollView         = [[NSScrollView alloc] initWithFrame:NSZeroRect];
+		NSScrollView* scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
 		scrollView.hasVerticalScroller   = YES;
 		scrollView.hasHorizontalScroller = NO;
 		scrollView.autohidesScrollers    = YES;
 		scrollView.borderType            = NSNoBorder;
 		scrollView.documentView          = _tableView;
 		scrollView.autoresizingMask      = NSViewWidthSizable|NSViewHeightSizable;
+		scrollView.drawsBackground       = NO;
 
-		if(@available(macos 10.11, *))
-		{
-			NSVisualEffectView* effectView = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
-			effectView.autoresizingMask = NSViewWidthSizable|NSViewHeightSizable;
+		NSVisualEffectView* effectView = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+		effectView.autoresizingMask = NSViewWidthSizable|NSViewHeightSizable;
+		effectView.material         = NSVisualEffectMaterialMenu;
 
-			effectView.material = NSVisualEffectMaterialMenu; // MAC_OS_X_VERSION_10_11
-			if(@available(macos 10.14, *))
-				effectView.blendingMode = NSVisualEffectBlendingModeBehindWindow; // MAC_OS_X_VERSION_10_14
+		if(@available(macos 10.14, *))
+			effectView.blendingMode = NSVisualEffectBlendingModeBehindWindow; // MAC_OS_X_VERSION_10_14
 
-			_tableView.backgroundColor = NSColor.clearColor;
-			scrollView.drawsBackground  = NO;
+		[effectView addSubview:scrollView positioned:NSWindowBelow relativeTo:nil];
 
-			[effectView addSubview:scrollView positioned:NSWindowBelow relativeTo:nil];
-
-			[self.window setContentView:effectView];
-		}
-		else
-		{
-			self.window.opaque             = NO;
-			self.window.alphaValue         = 0.97;
-			self.window.backgroundColor    = [NSColor colorWithCalibratedRed:1.00 green:0.96 blue:0.76 alpha:1];
-
-			_tableView.usesAlternatingRowBackgroundColors = YES;
-
-			[self.window setContentView:scrollView];
-		}
+		[self.window setContentView:effectView];
 	}
 	return self;
 }
 
 - (void)dealloc
 {
-	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	[NSNotificationCenter.defaultCenter removeObserver:self];
 	[self close];
 }
 
@@ -115,7 +101,7 @@ enum action_t { kActionNop, kActionTab, kActionReturn, kActionCancel, kActionMov
 - (void)viewBoundsDidChange:(NSNotification*)aNotification
 {
 	NSView* aView = [[aNotification object] documentView];
-	[self.window setFrameTopLeftPoint:[[aView window] convertRectToScreen:[aView convertRect:(NSRect){ _topLeftPosition, NSZeroSize } fromView:nil]].origin];
+	[self.window setFrameTopLeftPoint:[[aView window] convertRectToScreen:[aView convertRect:(NSRect){ _topLeftPosition, NSZeroSize } toView:nil]].origin];
 }
 
 - (NSString*)selectedChoice
@@ -185,8 +171,8 @@ enum action_t { kActionNop, kActionTab, kActionReturn, kActionCancel, kActionMov
 
 	[self sizeToFit];
 
-	_topLeftPosition = [aView convertRect:[[aView window] convertRectFromScreen:(NSRect){ aPoint, NSZeroSize }] toView:nil].origin;
-	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(viewBoundsDidChange:) name:NSViewBoundsDidChangeNotification object:[[aView enclosingScrollView] contentView]];
+	_topLeftPosition = [aView convertRect:[[aView window] convertRectFromScreen:(NSRect){ aPoint, NSZeroSize }] fromView:nil].origin;
+	[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(viewBoundsDidChange:) name:NSViewBoundsDidChangeNotification object:[[aView enclosingScrollView] contentView]];
 	[[aView window] addChildWindow:self.window ordered:NSWindowAbove];
 
 	[self.window orderFront:self];
@@ -225,7 +211,7 @@ enum action_t { kActionNop, kActionTab, kActionReturn, kActionCancel, kActionMov
 	}
 
 	if(res == OakChoiceMenuKeyMovement)
-		self.choiceIndex = oak::cap<NSInteger>(0, (_choiceIndex == NSNotFound ? (offset > 0 ? -1 : [_choices count]) : _choiceIndex) + offset, [_choices count] - 1);
+		self.choiceIndex = std::clamp<NSInteger>((_choiceIndex == NSNotFound ? (offset > 0 ? -1 : [_choices count]) : _choiceIndex) + offset, 0, [_choices count] - 1);
 
 	return res;
 }

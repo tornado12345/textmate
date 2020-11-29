@@ -387,16 +387,14 @@ styles_t const& theme_t::styles_for_scope (scope::scope_t const& scope) const
 		std::multimap<double, decomposed_style_t> ordering;
 		for(auto const& it : global_styles(scope))
 		{
-			double rank = 0;
-			if(it.scope_selector.does_match(scope, &rank))
-				ordering.emplace(rank, it);
+			if(auto rank = it.scope_selector.does_match(scope))
+				ordering.emplace(*rank, it);
 		}
 
 		for(auto const& it : _styles->_styles)
 		{
-			double rank = 0;
-			if(it.scope_selector.does_match(scope, &rank))
-				ordering.emplace(rank, it);
+			if(auto rank = it.scope_selector.does_match(scope))
+				ordering.emplace(*rank, it);
 		}
 
 		decomposed_style_t base(scope::selector_t(), _font_name, _font_size);
@@ -477,13 +475,13 @@ static CGFloat read_font_size (std::string const& str_font_size)
 			else if(strcmp(last, "em") == 0)
 				return -size;
 			else if(strcmp(last, "%") == 0)
-				 return -size / 100;
+				return -size / 100;
 			else
-				fprintf(stderr, "*** unsupported font size unit: %s (%s)\n", last, str_font_size.c_str());
+				os_log_error(OS_LOG_DEFAULT, "Unsupported font size unit: %{public}s (%{public}s)", last, str_font_size.c_str());
 		}
 		else
 		{
-			fprintf(stderr, "*** unsupported font size format: %s\n", str_font_size.c_str());
+			os_log_error(OS_LOG_DEFAULT, "Unsupported font size format: %{public}s", str_font_size.c_str());
 		}
 	}
 	return -1;

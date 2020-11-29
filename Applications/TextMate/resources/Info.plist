@@ -3,21 +3,21 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>${APP_NAME}</string>
+	<string>${TARGET_NAME}</string>
 	<key>CFBundleShortVersionString</key>
 	<string>${APP_VERSION}</string>
 	<key>CFBundleVersion</key>
 	<string>9800</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.macromates.${APP_NAME}</string>
+	<string>com.macromates.${TARGET_NAME}</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleExecutable</key>
 	<string>${TARGET_NAME}</string>
 	<key>CFBundleHelpBookFolder</key>
-	<string>${APP_NAME} Help</string>
+	<string>${TARGET_NAME} Help</string>
 	<key>CFBundleHelpBookName</key>
-	<string>${APP_NAME} 2 Help</string>
+	<string>${TARGET_NAME} 2 Help</string>
 	<key>CFBundleIconFile</key>
 	<string>TextMate</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -37,6 +37,8 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>TextMate needs to send back a response to the application from which “Edit in TextMate” was invoked. This is done using AppleEvents.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Your email address is used as a default contact address when you create a new bundle. This can be changed in the bundle editor after the bundle has been created.</string>
 	<key>NSMainNibFile</key>
@@ -3536,5 +3538,22 @@
 			</dict>
 		</dict>
 	</array>
+	<key>TMSigningKeys</key>
+	<dict>
+		<key>org.textmate.duff</key>
+		<string>-----BEGIN PUBLIC KEY-----
+MIIBtjCCASsGByqGSM44BAEwggEeAoGBAPIE9PpXPK3y2eBDJ0dnR/D8xR1TiT9m
+8DnPXYqkxwlqmjSShmJEmxYycnbliv2JpojYF4ikBUPJPuerlZfOvUBC99ERAgz7
+N1HYHfzFIxVo1oTKWurFJ1OOOsfg8AQDBDHnKpS1VnwVoDuvO05gK8jjQs9E5LcH
+e/opThzSrI7/AhUAy02E9H7EOwRyRNLofdtPxpa10o0CgYBKDfcBscidAoH4pkHR
+IOEGTCYl3G2Pd1yrblCp0nCCUEBCnvmrWVSXUTVa2/AyOZUTN9uZSC/Kq9XYgqwj
+hgzqa8h/a8yD+ao4q8WovwGeb6Iso3WlPl8waz6EAPR/nlUTnJ4jzr9t6iSH9owS
+vAmWrgeboia0CI2AH++liCDvigOBhAACgYAFWO66xFvmF2tVIB+4E7CwhrSi2uIk
+deBrpmNcZZ+AVFy1RXJelNe/cZ1aXBYskn/57xigklpkfHR6DGqpEbm6KC/47Jfy
+y5GEx+F/eBWEePi90XnLinytjmXRmS2FNqX6D15XNG1xJfjociA8bzC7s4gfeTUd
+lpQkBq2z71yitA==
+-----END PUBLIC KEY-----
+</string>
+	</dict>
 </dict>
 </plist>

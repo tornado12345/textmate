@@ -21,24 +21,23 @@ namespace find
 		filesize_limit     = (1 << 10),
 	};
 
-	PUBLIC options_t operator| (options_t lhs, options_t rhs);
-	PUBLIC options_t operator^ (options_t lhs, options_t rhs);
-	PUBLIC options_t operator& (options_t lhs, options_t rhs);
-	PUBLIC options_t& operator|= (options_t& lhs, options_t rhs);
-	PUBLIC options_t& operator&= (options_t& lhs, unsigned rhs);
+	options_t operator| (options_t lhs, options_t rhs);
+	options_t operator^ (options_t lhs, options_t rhs);
+	options_t operator& (options_t lhs, options_t rhs);
+	options_t& operator|= (options_t& lhs, options_t rhs);
+	options_t& operator&= (options_t& lhs, unsigned rhs);
 
 	struct find_implementation_t;
 
-	struct PUBLIC find_t
+	struct find_t
 	{
 		find_t (std::string const& str, options_t options = none);
 
-		std::pair<ssize_t, ssize_t> match (char const* buf, ssize_t len, std::map<std::string, std::string>* captures = NULL);
-		void set_skip_first (ssize_t offset);
-		void set_skip_last (ssize_t offset);
+		void each_match (char const* buf, size_t len, bool moreToCome, std::function<void(std::pair<size_t, size_t> const&, std::map<std::string, std::string> const&)> const& f);
 
 	private:
 		std::shared_ptr<find_implementation_t> pimpl;
+		size_t _offset = 0;
 	};
 }
 

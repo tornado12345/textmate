@@ -106,12 +106,8 @@ static NSTextField* OakCreateTextField ()
 	self.registerButton.keyEquivalent = @"\r";
 	self.cancelButton.keyEquivalent = @"\033";
 
-	NSString* const ownerPlaceholder = @"name";
-	NSString* const licensePlaceholder = @""
-		@"IFWGYIDDN5WXA33TNF2GKIDQNBSW433NMVXGCIDBOJSSA2LNOBSX-\n"
-		@"E3LBNZSW45BOEAQCACSBNRWCAY3PNZ2GC3LJNZQXIZLEEB2GQ2LO-\n"
-		@"M5ZSAYLSMUQHK3TTMF2GS43GMFRXI33SPEXAUQLMNQQHA2DFNZXW-\n"
-		@"2ZLOMEQGC4TFEBSW24DUPEQGC3TEEBZWK3DGNRSXG4ZOEAQAU";
+	NSString* const ownerPlaceholder   = @"name";
+	NSString* const licensePlaceholder = @"license key (4 lines)";
 
 	[self.ownerTextField   bind:NSValueBinding   toObject:self withKeyPath:@"representedObject.owner"           options:@{ NSContinuouslyUpdatesValueBindingOption: @YES, NSNullPlaceholderBindingOption: ownerPlaceholder }];
 	[self.licenseTextField bind:NSValueBinding   toObject:self withKeyPath:@"representedObject.licenseAsBase32" options:@{ NSContinuouslyUpdatesValueBindingOption: @YES, NSNullPlaceholderBindingOption: licensePlaceholder }];
@@ -124,7 +120,6 @@ static NSTextField* OakCreateTextField ()
 	self.buyButton.action      = @selector(visitOnlineStore:);
 	self.buyButton.target      = self;
 
-	OakSetupKeyViewLoop(@[ self.ownerTextField, self.licenseTextField, self.buyButton, self.cancelButton, self.registerButton ]);
 	NSDictionary* views = @{
 		@"ownerLabel":   self.ownerLabel,
 		@"owner":        self.ownerTextField,
@@ -151,7 +146,7 @@ static NSTextField* OakCreateTextField ()
 
 - (void)visitOnlineStore:(id)sender
 {
-	[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://shop.macromates.com"]];
+	[NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:@"https://shop.macromates.com"]];
 }
 
 - (void)addLicense:(id)sender
@@ -297,8 +292,8 @@ static NSString* const kAddLicenseViewIdentifier = @"org.TextMate.addLicenseButt
 	addLicenseButton.showsBorderOnlyWhileMouseInside = YES;
 	addLicenseButton.controlSize = NSControlSizeSmall;
 	addLicenseButton.font        = [NSFont messageFontOfSize:[NSFont systemFontSizeForControlSize:NSControlSizeSmall]];
-	addLicenseButton.bezelStyle  = NSRecessedBezelStyle;
-	addLicenseButton.buttonType  = NSMomentaryPushInButton;
+	addLicenseButton.bezelStyle  = NSBezelStyleRecessed;
+	addLicenseButton.buttonType  = NSButtonTypeMomentaryPushIn;
 	addLicenseButton.title       = @"Add License";
 	addLicenseButton.action      = @selector(showAddLicensePopover:);
 	addLicenseButton.target      = self;

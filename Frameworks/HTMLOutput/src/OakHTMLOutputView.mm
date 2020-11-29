@@ -11,9 +11,6 @@
 @end
 
 @interface OakHTMLOutputView ()
-{
-	OBJC_WATCH_LEAKS(OakHTMLOutputView);
-}
 @property (nonatomic, getter = isRunningCommand, readwrite) BOOL runningCommand;
 @property (nonatomic) HOAutoScroll* autoScrollHelper;
 @property (nonatomic) std::map<std::string, std::string> environment;
@@ -60,16 +57,16 @@
 	{
 		NSAlert* alert = askUserFlag ? [NSAlert tmAlertWithMessageText:[NSString stringWithFormat:@"Stop “%@”?", [NSURLProtocol propertyForKey:@"processName" inRequest:request]] informativeText:@"The job that the task is performing will not be completed." buttons:@"Stop", @"Cancel", nil] : nil;
 
-		__weak __block id observerId = [[NSNotificationCenter defaultCenter] addObserverForName:@"OakCommandDidTerminateNotification" object:command queue:nil usingBlock:^(NSNotification* notification){
+		__weak __block id token = [NSNotificationCenter.defaultCenter addObserverForName:@"OakCommandDidTerminateNotification" object:command queue:nil usingBlock:^(NSNotification* notification){
 			if(alert)
 				[self.window endSheet:alert.window returnCode:NSAlertFirstButtonReturn];
 			handler(YES);
-			[[NSNotificationCenter defaultCenter] removeObserver:observerId];
+			[NSNotificationCenter.defaultCenter removeObserver:token];
 		}];
 
 		if(alert)
 		{
-			[alert beginSheetModalForWindow:self.window completionHandler:^(NSInteger returnCode){
+			[alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse returnCode){
 				if(returnCode == NSAlertFirstButtonReturn) /* "Stop" */
 				{
 					[self.webView.mainFrame stopLoading];
@@ -77,7 +74,7 @@
 				else
 				{
 					handler(NO);
-					[[NSNotificationCenter defaultCenter] removeObserver:observerId];
+					[NSNotificationCenter.defaultCenter removeObserver:token];
 				}
 			}];
 		}
@@ -111,9 +108,9 @@
 
 - (void)viewDidMoveToWindow
 {
-	[[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowWillCloseNotification object:nil];
+	[NSNotificationCenter.defaultCenter removeObserver:self name:NSWindowWillCloseNotification object:nil];
 	if(self.window)
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowWillClose:) name:NSWindowWillCloseNotification object:self.window];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(windowWillClose:) name:NSWindowWillCloseNotification object:self.window];
 	self.visible = self.window ? YES : NO;
 }
 
@@ -216,7 +213,7 @@
 		}
 		else
 		{
-			[[NSWorkspace sharedWorkspace] openURL:url];
+			[NSWorkspace.sharedWorkspace openURL:url];
 		}
 	}
 }

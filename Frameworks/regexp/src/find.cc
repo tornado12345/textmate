@@ -41,8 +41,6 @@ namespace find
 	protected:
 		find_implementation_t () : skip_first(0), skip_last(0)  { }
 		virtual ~find_implementation_t ()                       { }
-		virtual void set_skip_first (ssize_t offset)            { skip_first = offset; }
-		virtual void set_skip_last (ssize_t offset)             { skip_last = offset; }
 		virtual std::pair<ssize_t, ssize_t> match (char const* buf, ssize_t len, std::map<std::string, std::string>* captures) = 0;
 
 		ssize_t skip_first, skip_last;
@@ -327,7 +325,7 @@ namespace find
 			{
 				OnigUChar s[ONIG_MAX_ERROR_MESSAGE_LEN];
 				onig_error_code_to_str(s, r, &einfo);
-				fprintf(stderr, "ERROR %s (%s)\n", s, str.c_str());
+				os_log_error(OS_LOG_DEFAULT, "regexp_find_t: %{public}s (%{public}s)", s, str.c_str());
 
 				if(compiled_pattern)
 				{
@@ -442,8 +440,30 @@ namespace find
 		else	pimpl = std::make_shared<regular_find_t>(str, options);
 	}
 
-	std::pair<ssize_t, ssize_t> find_t::match (char const* buf, ssize_t len, std::map<std::string, std::string>* captures) { return pimpl->match(buf, len, captures); }
-	void find_t::set_skip_first (ssize_t offset)                                                                           { pimpl->set_skip_first(offset); }
-	void find_t::set_skip_last (ssize_t offset)                                                                            { pimpl->set_skip_last(offset); }
+	void find_t::each_match (char const* buf, size_t len, bool moreToCome, std::function<void(std::pair<size_t, size_t> const&, std::map<std::string, std::string> const&)> const& f)
+	{
+		for(size_t offset = 0; offset < len; )
+		{
+			std::map<std::string, std::string> captures;
+			std::pair<ssize_t, ssize_t> const& m = pimpl->match(buf + offset, len - offset, &captures);
+			if(m.first <= m.second)
+				f(std::make_pair(_offset + offset + m.first, _offset + offset + m.second), captures);
+			offset += m.second;
+		}
+
+		_offset += len;
+
+		if(!moreToCome) // Reached end-of-buffer
+		{
+			std::map<std::string, std::string> captures;
+			std::pair<ssize_t, ssize_t> m = pimpl->match(nullptr, 0, &captures);
+			while(m.first <= m.second)
+			{
+				f(std::make_pair(_offset + m.first, _offset + m.second), captures);
+				captures.clear();
+				m = pimpl->match(nullptr, 0, &captures);
+			}
+		}
+	}
 
 } /* find */

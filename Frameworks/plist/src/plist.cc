@@ -18,7 +18,7 @@ namespace plist
 	{
 		int64_t val = 0;
 		CFNumberGetValue(num, kCFNumberSInt64Type, &val);
-		if(oak::cap<int64_t>(INT32_MIN, val, INT32_MAX) == val)
+		if(std::clamp<int64_t>(val, INT32_MIN, INT32_MAX) == val)
 				res = int32_t(val);
 		else	res = uint64_t(val);
 	}
@@ -144,7 +144,7 @@ namespace plist
 			}
 			else
 			{
-				fprintf(stderr, "error parsing plist: ‘%s’\n", str.c_str());
+				os_log_error(OS_LOG_DEFAULT, "Error parsing plist: ‘%{public}s’", str.c_str());
 			}
 			CFRelease(data);
 		}
@@ -270,7 +270,7 @@ namespace plist
 
 	bool equal (any_t const& lhs, any_t const& rhs)
 	{
-	   return boost::apply_visitor(equal_helper_t(), lhs, rhs);
+		return boost::apply_visitor(equal_helper_t(), lhs, rhs);
 	}
 
 	// ================
@@ -341,18 +341,18 @@ namespace plist
 		else	return get_key_path(it->second, keyPath.substr(sep+1), ref);
 	}
 
-	template PUBLIC bool get_key_path (any_t const& plist, std::string const& keyPath, bool& ref);
-	template PUBLIC bool get_key_path (any_t const& plist, std::string const& keyPath, int32_t& ref);
-	template PUBLIC bool get_key_path (any_t const& plist, std::string const& keyPath, uint64_t& ref);
-	template PUBLIC bool get_key_path (any_t const& plist, std::string const& keyPath, float& ref);
-	template PUBLIC bool get_key_path (any_t const& plist, std::string const& keyPath, double& ref);
-	template PUBLIC bool get_key_path (any_t const& plist, std::string const& keyPath, oak::date_t& ref);
-	template PUBLIC bool get_key_path (any_t const& plist, std::string const& keyPath, oak::uuid_t& ref);
-	template PUBLIC bool get_key_path (any_t const& plist, std::string const& keyPath, std::string& ref);
-	template PUBLIC bool get_key_path (any_t const& plist, std::string const& keyPath, std::vector<char>& ref);
-	template PUBLIC bool get_key_path (any_t const& plist, std::string const& keyPath, any_t& ref);
-	template PUBLIC bool get_key_path (any_t const& plist, std::string const& keyPath, array_t& ref);
-	template PUBLIC bool get_key_path (any_t const& plist, std::string const& keyPath, dictionary_t& ref);
+	template bool get_key_path (any_t const& plist, std::string const& keyPath, bool& ref);
+	template bool get_key_path (any_t const& plist, std::string const& keyPath, int32_t& ref);
+	template bool get_key_path (any_t const& plist, std::string const& keyPath, uint64_t& ref);
+	template bool get_key_path (any_t const& plist, std::string const& keyPath, float& ref);
+	template bool get_key_path (any_t const& plist, std::string const& keyPath, double& ref);
+	template bool get_key_path (any_t const& plist, std::string const& keyPath, oak::date_t& ref);
+	template bool get_key_path (any_t const& plist, std::string const& keyPath, oak::uuid_t& ref);
+	template bool get_key_path (any_t const& plist, std::string const& keyPath, std::string& ref);
+	template bool get_key_path (any_t const& plist, std::string const& keyPath, std::vector<char>& ref);
+	template bool get_key_path (any_t const& plist, std::string const& keyPath, any_t& ref);
+	template bool get_key_path (any_t const& plist, std::string const& keyPath, array_t& ref);
+	template bool get_key_path (any_t const& plist, std::string const& keyPath, dictionary_t& ref);
 
 	// ========================
 	// = Supporting Functions =
@@ -372,11 +372,11 @@ namespace plist
 		return to;
 	}
 
-	template PUBLIC bool get (plist::any_t const& from);
-	template PUBLIC int32_t get (plist::any_t const& from);
-	template PUBLIC uint64_t get (plist::any_t const& from);
-	template PUBLIC std::string get (plist::any_t const& from);
-	template PUBLIC plist::array_t get (plist::any_t const& from);
-	template PUBLIC plist::dictionary_t get (plist::any_t const& from);
+	template bool get (plist::any_t const& from);
+	template int32_t get (plist::any_t const& from);
+	template uint64_t get (plist::any_t const& from);
+	template std::string get (plist::any_t const& from);
+	template plist::array_t get (plist::any_t const& from);
+	template plist::dictionary_t get (plist::any_t const& from);
 
 } /* plist */

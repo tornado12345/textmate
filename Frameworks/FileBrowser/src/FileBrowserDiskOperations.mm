@@ -1,4 +1,4 @@
-#import "FileBrowserView.h"
+#import "FileBrowserViewController.h"
 #import "FileBrowserNotifications.h"
 #import "FileItem.h"
 #import <OakAppKit/OakSound.h>
@@ -6,7 +6,7 @@
 #import <io/path.h>
 #import <ns/ns.h>
 
-@implementation FileBrowserView (DiskOperations)
+@implementation FileBrowserViewController (DiskOperations)
 - (NSArray<NSURL*>*)performOperation:(FBOperation)op withURLs:(NSDictionary<NSURL*, NSURL*>*)urls unique:(BOOL)makeUnique select:(BOOL)selectDestinationURLs
 {
 	NSMutableArray* srcURLs  = [NSMutableArray array];
@@ -33,8 +33,8 @@
 	NSUInteger total = MAX(srcURLs.count, destURLs.count);
 	for(NSUInteger i = 0; i < total; ++i)
 	{
-		NSURL* srcURL  = i < srcURLs.count  ? srcURLs[i]  : nil;
-		NSURL* destURL = i < destURLs.count ? destURLs[i] : nil;
+		NSURL* srcURL  = i < srcURLs.count  ? srcURLs[i].filePathURL  : nil;
+		NSURL* destURL = i < destURLs.count ? destURLs[i].filePathURL : nil;
 
 		NSError* error;
 		BOOL res = [self performOperation:op sourceURL:srcURL destinationURL:&destURL force:forceFlag error:&error];
@@ -54,7 +54,7 @@
 				switch([alert runModal])
 				{
 					case NSAlertFirstButtonReturn: // Replace
-						forceFlag = alert.suppressionButton.state == NSOnState;
+						forceFlag = alert.suppressionButton.state == NSControlStateValueOn;
 						res = [self performOperation:op sourceURL:srcURL destinationURL:&destURL force:YES error:&error];
 					break;
 
@@ -81,7 +81,7 @@
 				switch([alert runModal])
 				{
 					case NSAlertFirstButtonReturn: // Delete
-						forceFlag = alert.suppressionButton.state == NSOnState;
+						forceFlag = alert.suppressionButton.state == NSControlStateValueOn;
 						res = [self performOperation:op sourceURL:srcURL destinationURL:&destURL force:YES error:&error];
 					break;
 
@@ -237,7 +237,7 @@
 		{
 			NSRegularExpression* regex = [NSRegularExpression regularExpressionWithPattern:@"^(.*?)(?: \\d+)?(\\.\\w+)?$" options:0 error:nil];
 			NSString* name = [regex stringByReplacingMatchesInString:base options:0 range:NSMakeRange(0, base.length) withTemplate:[NSString stringWithFormat:@"$1 %ld$2", ++i]];
-			destURL = [destURL.URLByDeletingLastPathComponent URLByAppendingPathComponent:name isDirectory:destURL.tmHasDirectoryPath];
+			destURL = [destURL.URLByDeletingLastPathComponent URLByAppendingPathComponent:name isDirectory:destURL.hasDirectoryPath];
 		}
 		[existingURLs addObject:destURL];
 		[res addObject:destURL];
@@ -524,7 +524,7 @@
 
 - (BOOL)presentError:(NSError*)error
 {
-	[self presentError:error modalForWindow:self.window delegate:nil didPresentSelector:nullptr contextInfo:nullptr];
+	[self presentError:error modalForWindow:self.view.window delegate:nil didPresentSelector:nullptr contextInfo:nullptr];
 	return YES;
 }
 @end

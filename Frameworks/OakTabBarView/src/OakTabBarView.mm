@@ -27,7 +27,11 @@ static NSString* const OakTabItemPasteboardType = @"com.macromates.TextMate.tabI
 
 @class OakTabView;
 
-@interface OakTabItem () <NSPasteboardWriting>
+@interface OakTabItem : NSObject <NSPasteboardWriting>
+@property (nonatomic, readonly) NSString* identifier;
+@property (nonatomic) NSString* title;
+@property (nonatomic) NSString* path;
+@property (nonatomic, getter = isModified) BOOL modified;
 @property (nonatomic, getter = isSelected) BOOL selected;
 @property (nonatomic) CGFloat fittingWidth;
 @property (nonatomic) BOOL needsLayout;
@@ -203,7 +207,7 @@ static NSString* const OakTabItemPasteboardType = @"com.macromates.TextMate.tabI
 
 	NSInteger _tag;
 }
-@property (nonatomic, readwrite) NSMutableArray<OakTabItem*>* tabItems;
+@property (nonatomic) NSMutableArray<OakTabItem*>* tabItems;
 @property (nonatomic) NSInteger draggedTabIndex;
 @property (nonatomic) NSInteger dropTabAtIndex;
 @property (nonatomic) NSInteger freezeTabFramesLeftOfIndex;
@@ -494,20 +498,20 @@ static void* kOakTabViewSelectedContext  = &kOakTabViewSelectedContext;
 		// Break retain-cycle when view is removed from window
 		[self.closeButton unbind:@"alphaValue"];
 
-		[[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowDidBecomeMainNotification object:self.window];
-		[[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowDidResignMainNotification object:self.window];
-		[[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowDidBecomeKeyNotification object:self.window];
-		[[NSNotificationCenter defaultCenter] removeObserver:self name:NSWindowDidResignKeyNotification object:self.window];
+		[NSNotificationCenter.defaultCenter removeObserver:self name:NSWindowDidBecomeMainNotification object:self.window];
+		[NSNotificationCenter.defaultCenter removeObserver:self name:NSWindowDidResignMainNotification object:self.window];
+		[NSNotificationCenter.defaultCenter removeObserver:self name:NSWindowDidBecomeKeyNotification object:self.window];
+		[NSNotificationCenter.defaultCenter removeObserver:self name:NSWindowDidResignKeyNotification object:self.window];
 	}
 
 	if(newWindow)
 	{
 		[self.closeButton bind:@"alphaValue" toObject:self withKeyPath:@"closeButtonAlphaValue" options:nil];
 
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowDidChangeMainOrKey:) name:NSWindowDidBecomeMainNotification object:newWindow];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowDidChangeMainOrKey:) name:NSWindowDidResignMainNotification object:newWindow];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowDidChangeMainOrKey:) name:NSWindowDidBecomeKeyNotification object:newWindow];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(windowDidChangeMainOrKey:) name:NSWindowDidResignKeyNotification object:newWindow];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(windowDidChangeMainOrKey:) name:NSWindowDidBecomeMainNotification object:newWindow];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(windowDidChangeMainOrKey:) name:NSWindowDidResignMainNotification object:newWindow];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(windowDidChangeMainOrKey:) name:NSWindowDidBecomeKeyNotification object:newWindow];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(windowDidChangeMainOrKey:) name:NSWindowDidResignKeyNotification object:newWindow];
 	}
 }
 
@@ -666,14 +670,6 @@ static void* kOakTabViewSelectedContext  = &kOakTabViewSelectedContext;
 // =================
 
 @implementation OakTabBarView
-+ (void)initialize
-{
-	[[NSUserDefaults standardUserDefaults] registerDefaults:@{
-		kUserDefaultsTabItemMinWidthKey: @(120),
-		kUserDefaultsTabItemMaxWidthKey: @(250),
-	}];
-}
-
 + (id)defaultAnimationForKey:(NSString*)key
 {
 	if([key isEqualToString:@"tabLayoutAnimationProgress"])
@@ -688,6 +684,14 @@ static void* kOakTabViewSelectedContext  = &kOakTabViewSelectedContext;
 
 - (instancetype)initWithFrame:(NSRect)aRect
 {
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		[NSUserDefaults.standardUserDefaults registerDefaults:@{
+			kUserDefaultsTabItemMinWidthKey: @(120),
+			kUserDefaultsTabItemMaxWidthKey: @(250),
+		}];
+	});
+
 	if(self = [super initWithFrame:aRect])
 	{
 		self.accessibilityRole  = NSAccessibilityTabGroupRole;
@@ -713,7 +717,7 @@ static void* kOakTabViewSelectedContext  = &kOakTabViewSelectedContext;
 
 - (NSSize)intrinsicContentSize
 {
-	return NSMakeSize(NSViewNoInstrinsicMetric, 23);
+	return NSMakeSize(NSViewNoIntrinsicMetric, 23);
 }
 
 - (BOOL)mouseDownCanMoveWindow
@@ -729,7 +733,7 @@ static void* kOakTabViewSelectedContext  = &kOakTabViewSelectedContext;
 		_createNewTabButton.accessibilityLabel = @"Create new tab";
 		_createNewTabButton.image      = [NSImage imageNamed:NSImageNameAddTemplate];
 		_createNewTabButton.bordered   = NO;
-		_createNewTabButton.buttonType = NSMomentaryChangeButton;
+		_createNewTabButton.buttonType = NSButtonTypeMomentaryChange;
 		_createNewTabButton.toolTip    = @"Create new tab";
 		_createNewTabButton.action     = @selector(newTab:);
 		_createNewTabButton.target     = self;
@@ -737,10 +741,9 @@ static void* kOakTabViewSelectedContext  = &kOakTabViewSelectedContext;
 	return _createNewTabButton;
 }
 
-- (NSInteger)selectedTabIndex
+- (NSUInteger)selectedTabIndex
 {
-	NSUInteger res = [_tabItems indexOfObjectPassingTest:^BOOL(OakTabItem* tabItem, NSUInteger index, BOOL* stop){ return tabItem.isSelected; }];
-	return res != NSNotFound ? res : -1;
+	return [_tabItems indexOfObjectPassingTest:^BOOL(OakTabItem* tabItem, NSUInteger index, BOOL* stop){ return tabItem.isSelected; }];
 }
 
 - (void)setDraggedTabIndex:(NSInteger)newDraggedTabIndex
@@ -787,7 +790,7 @@ static void* kOakTabViewSelectedContext  = &kOakTabViewSelectedContext;
 	NSMutableArray<OakTabItem*>* newTabItems = [NSMutableArray array];
 	for(NSUInteger i = 0; i < newCount; ++i)
 	{
-		NSString* identifier = [_dataSource tabBarView:self identifierForIndex:i];
+		NSString* identifier = [_dataSource tabBarView:self UUIDForIndex:i].UUIDString;
 		OakTabItem* tabItem = oldTabItems[identifier];
 		if(tabItem)
 		{
@@ -860,7 +863,7 @@ static void* kOakTabViewSelectedContext  = &kOakTabViewSelectedContext;
 		}
 
 		if(tabItem.isSelected)
-			item.state = NSOnState;
+			item.state = NSControlStateValueOn;
 		else if(tabItem.isModified)
 			item.modifiedState = YES;
 	}
@@ -871,17 +874,12 @@ static void* kOakTabViewSelectedContext  = &kOakTabViewSelectedContext;
 // = Actions =
 // ===========
 
-- (OakTabItem*)selectedTabItem
-{
-	return [_tabItems filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"selected == YES"]].firstObject;
-}
-
-- (void)setSelectedTabIndex:(NSInteger)index
+- (void)setSelectedTabIndex:(NSUInteger)index
 {
 	for(NSUInteger i = 0; i < _tabItems.count; ++i)
 		_tabItems[i].selected = i == index;
 
-	if(0 <= index && index < _tabItems.count)
+	if(index < _tabItems.count)
 	{
 		if(!_tabItems[index].tabView || NSWidth(_tabItems[index].tabView.frame) == 0)
 			[self updateToLayout:[self makeLayout]];
@@ -1058,7 +1056,7 @@ static void* kOakTabViewSelectedContext  = &kOakTabViewSelectedContext;
 		return NO;
 
 	BOOL shouldDelegate = [_delegate respondsToSelector:@selector(performDropOfTabItem:fromTabBar:index:toTabBar:index:operation:)];
-	return shouldDelegate && [_delegate performDropOfTabItem:tabItem fromTabBar:sourceTabBar index:fromIndex toTabBar:self index:toIndex operation:(mask & NSDragOperationMove) ?: (mask & NSDragOperationCopy)];
+	return shouldDelegate && [_delegate performDropOfTabItem:[[NSUUID alloc] initWithUUIDString:tabItem.identifier] fromTabBar:sourceTabBar index:fromIndex toTabBar:self index:toIndex operation:(mask & NSDragOperationMove) ?: (mask & NSDragOperationCopy)];
 }
 
 - (void)concludeDragOperation:(id <NSDraggingInfo>)sender
@@ -1337,7 +1335,10 @@ static void* kOakTabViewSelectedContext  = &kOakTabViewSelectedContext;
 	_currentLayout = newLayout;
 
 	for(OakTabView* tabView in existingTabViews.allValues)
+	{
+		tabView.tabItem.tabView = nil;
 		[tabView removeFromSuperview];
+	}
 
 	NSRect createNewTabButtonFrame = _createNewTabButton.frame;
 	CGFloat x = -1, y = NSMinY(self.bounds)+1, height = NSHeight(self.bounds)-1;

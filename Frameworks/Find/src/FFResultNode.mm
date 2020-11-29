@@ -16,8 +16,7 @@ namespace
 		{
 			NSMutableParagraphStyle* paragraph = [NSMutableParagraphStyle new];
 			[paragraph setLineBreakMode:mode];
-			if([paragraph respondsToSelector:@selector(setAllowsDefaultTighteningForTruncation:)]) // MAC_OS_X_VERSION_10_11
-				[paragraph setAllowsDefaultTighteningForTruncation:NO];
+			[paragraph setAllowsDefaultTighteningForTruncation:NO];
 
 			_string = [[NSMutableAttributedString alloc] init];
 			_attributes.push_back(@{ NSParagraphStyleAttributeName: paragraph });
@@ -38,20 +37,31 @@ namespace
 			_font_traits.pop_back();
 		}
 
-		void append (NSString* str, NSFontTraitMask fontTraits)
+		void append (std::string const& cStr, NSFontTraitMask fontTraits)
 		{
-			append(str, nil, fontTraits);
+			append(cStr, nil, fontTraits);
 		}
 
-		void append (NSString* str, NSDictionary* attrs = nil, NSFontTraitMask fontTraits = 0)
+		void append (std::string const& cStr, NSDictionary* attrs = nil, NSFontTraitMask fontTraits = 0)
 		{
-			push_style(attrs, fontTraits);
+			if(NSString* str = to_ns(cStr))
+			{
+				push_style(attrs, fontTraits);
 
-			NSMutableAttributedString* aStr = [[NSMutableAttributedString alloc] initWithString:str attributes:_attributes.back()];
-			[aStr applyFontTraits:_font_traits.back() range:NSMakeRange(0, str.length)];
-			[_string appendAttributedString:aStr];
+				NSMutableAttributedString* aStr = [[NSMutableAttributedString alloc] initWithString:str attributes:_attributes.back()];
+				[aStr applyFontTraits:_font_traits.back() range:NSMakeRange(0, str.length)];
+				[_string appendAttributedString:aStr];
 
-			pop_style();
+				pop_style();
+			}
+			else
+			{
+				NSDictionary* attributes = @{
+					NSForegroundColorAttributeName: NSColor.systemYellowColor,
+					NSBackgroundColorAttributeName: NSColor.systemRedColor,
+				};
+				[_string appendAttributedString:[[NSMutableAttributedString alloc] initWithString:@"Error: Please file a bug report!" attributes:attributes]];
+			}
 		}
 
 		NSAttributedString* attributed_string () const
@@ -82,8 +92,8 @@ static NSAttributedString* PathComponentString (std::string const& path, std::st
 		NSFontAttributeName:            font,
 		NSForegroundColorAttributeName: [NSColor secondaryLabelColor]
 	});
-	builder.append(to_ns(text::join(std::vector<std::string>(components.begin(), components.end()), " ‣ ")));
-	builder.append(to_ns((path::is_absolute(path) ? path::display_name(path) : path)), NSBoldFontMask);
+	builder.append(text::join(std::vector<std::string>(components.begin(), components.end()), " ‣ "));
+	builder.append((path::is_absolute(path) ? path::display_name(path) : path), NSBoldFontMask);
 	return builder.attributed_string();
 }
 
@@ -94,15 +104,15 @@ static void append (string_builder_t& dst, std::string const& src, size_t from, 
 	{
 		if(src[i] == '\t' || src[i] == '\r')
 		{
-			dst.append(to_ns(src.substr(begin, i-begin)));
+			dst.append(src.substr(begin, i-begin));
 			if(src[i] == '\t')
-				dst.append(@"\u2003");
+				dst.append("\u2003");
 			else if(src[i] == '\r')
-				dst.append(@"<CR>", @{ NSForegroundColorAttributeName: [NSColor lightGrayColor] });
+				dst.append("<CR>", @{ NSForegroundColorAttributeName: NSColor.tertiaryLabelColor });
 			begin = i+1;
 		}
 	}
-	dst.append(to_ns(src.substr(begin, to-begin)));
+	dst.append(src.substr(begin, to-begin));
 }
 
 static NSAttributedString* AttributedStringForMatch (std::string const& text, size_t from, size_t to, size_t n, std::string const& newlines, NSFont* font)
@@ -125,7 +135,7 @@ static NSAttributedString* AttributedStringForMatch (std::string const& text, si
 	NSFontDescriptor* descriptor = [font.fontDescriptor fontDescriptorByAddingAttributes:@{
 		NSFontFeatureSettingsAttribute: @[ @{ NSFontFeatureTypeIdentifierKey: @(kNumberSpacingType), NSFontFeatureSelectorIdentifierKey: @(kMonospacedNumbersSelector) } ]
 	}];
-	builder.append(to_ns(text::pad(++n, 4) + ": "), @{ NSFontAttributeName: [NSFont fontWithDescriptor:descriptor size:0] });
+	builder.append(text::pad(++n, 4) + ": ", @{ NSFontAttributeName: [NSFont fontWithDescriptor:descriptor size:0] });
 
 	bool inMatch = false;
 	size_t last = text.size();
@@ -134,7 +144,7 @@ static NSAttributedString* AttributedStringForMatch (std::string const& text, si
 		size_t eol = text.find(newlines, it);
 		eol = eol != std::string::npos ? eol : last;
 
-		if(oak::cap(it, from, eol) == from)
+		if(std::clamp(from, it, eol) == from)
 		{
 			append(builder, text, it, from);
 			it = from;
@@ -144,7 +154,7 @@ static NSAttributedString* AttributedStringForMatch (std::string const& text, si
 			inMatch = true;
 		}
 
-		if(inMatch && oak::cap(it, to, eol) == to)
+		if(inMatch && std::clamp(to, it, eol) == to)
 		{
 			append(builder, text, it, to);
 			it = to;
@@ -157,7 +167,7 @@ static NSAttributedString* AttributedStringForMatch (std::string const& text, si
 
 		if(eol != last)
 		{
-			builder.append(@"¬");
+			builder.append("¬");
 
 			if((eol += newlines.size()) == to)
 			{
@@ -169,8 +179,8 @@ static NSAttributedString* AttributedStringForMatch (std::string const& text, si
 			{
 				if(inMatch)
 					builder.pop_style();
-				builder.append(@"\n");
-				builder.append(to_ns(text::pad(++n, 4) + ": "), @{ NSFontAttributeName: [NSFont fontWithDescriptor:descriptor size:0] });
+				builder.append("\n");
+				builder.append(text::pad(++n, 4) + ": ", @{ NSFontAttributeName: [NSFont fontWithDescriptor:descriptor size:0] });
 				if(inMatch)
 					builder.push_style(matchAttributes, matchFontTraits);
 			}
@@ -184,9 +194,8 @@ static NSAttributedString* AttributedStringForMatch (std::string const& text, si
 
 @interface FFResultNode ()
 {
-	OBJC_WATCH_LEAKS(FFResultNode);
 	NSAttributedString* _excerpt;
-	NSString* _excerptReplaceString;
+	NSString* _cachedReplaceString;
 }
 @property (nonatomic, readwrite) OakDocumentMatch* match;
 @property (nonatomic, readwrite) NSUInteger countOfLeafs;
@@ -305,7 +314,7 @@ static NSAttributedString* AttributedStringForMatch (std::string const& text, si
 
 - (NSAttributedString*)excerptWithReplacement:(NSString*)replacementString font:(NSFont*)font
 {
-	if(_excerpt && (replacementString == _excerptReplaceString || [replacementString isEqualToString:_excerptReplaceString]))
+	if(_excerpt && (replacementString == _cachedReplaceString || (replacementString && [replacementString isEqualToString:_cachedReplaceString])))
 		return _excerpt;
 
 	OakDocumentMatch* m = _match;
@@ -329,18 +338,8 @@ static NSAttributedString* AttributedStringForMatch (std::string const& text, si
 	if(replacementString)
 		middle = m.captures.empty() ? to_s(replacementString) : format_string::expand(to_s(replacementString), m.captures);
 
-	if(!utf8::is_valid(prefix.begin(), prefix.end()) || !utf8::is_valid(middle.begin(), middle.end()) || !utf8::is_valid(suffix.begin(), suffix.end()))
-	{
-		string_builder_t builder(NSLineBreakByTruncatingTail);
-		builder.append(to_ns(text::format("%zu-%zu: Range is not valid UTF-8, please contact: https://macromates.com/support", m.first, m.last)), @{
-			NSFontAttributeName:            font,
-			NSForegroundColorAttributeName: [NSColor secondaryLabelColor]
-		});
-		return builder.attributed_string();
-	}
-
 	_excerpt = AttributedStringForMatch(prefix + middle + suffix, prefix.size(), prefix.size() + middle.size(), m.lineNumber, to_s(m.newlines), font);
-	_excerptReplaceString = replacementString;
+	_cachedReplaceString = replacementString;
 	return _excerpt;
 }
 @end

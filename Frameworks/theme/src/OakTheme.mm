@@ -104,7 +104,7 @@ static CGFloat ParseFontSize (NSString* fontSizeString)
 			{ @"misspelled",    OakThemeStyleMisspelled    },
 		};
 
-		for(auto const option : options)
+		for(auto option : options)
 		{
 			bundles::item_ptr item;
 			plist::any_t const value = bundles::value_for_setting(to_s(option.key), scope, &item);
@@ -141,7 +141,7 @@ static CGFloat ParseFontSize (NSString* fontSizeString)
 
 			if(NSNumber* misspelled = settings[@"misspelled"])
 			{
-				_options     |= [misspelled boolValue] ? OakThemeStyleMisspelled : 0;
+				_options     |= misspelled.boolValue ? OakThemeStyleMisspelled : 0;
 				_optionsMask |= OakThemeStyleMisspelled;
 			}
 
@@ -157,7 +157,7 @@ static CGFloat ParseFontSize (NSString* fontSizeString)
 					{ @"strikethrough", OakThemeStyleStrikethrough },
 				};
 
-				for(auto const option : options)
+				for(auto option : options)
 				{
 					if([fontStyle containsString:option.keyword])
 					{
@@ -244,15 +244,10 @@ static CGFloat ParseFontSize (NSString* fontSizeString)
 		}
 
 		_font       = [NSFont fontWithName:fontName size:fontSize];
-		_fontTraits = (boldEnabled ? NSFontDescriptorTraitBold : 0) | (italicEnabled ? NSFontDescriptorTraitItalic : 0);
+		_fontTraits = (boldEnabled ? NSBoldFontMask : 0) | (italicEnabled ? NSItalicFontMask : 0);
 
 		if(_fontTraits)
-		{
-			_font = [NSFont fontWithDescriptor:[NSFontDescriptor fontDescriptorWithFontAttributes:@{
-				NSFontFamilyAttribute: _font.familyName,
-				NSFontTraitsAttribute: @{ NSFontSymbolicTrait: @(_fontTraits) },
-			}] size:_font.pointSize];
-		}
+			_font = [NSFontManager.sharedFontManager convertFont:_font toHaveTrait:_fontTraits];
 	}
 	return self;
 }
@@ -407,19 +402,17 @@ static CGFloat ParseFontSize (NSString* fontSizeString)
 	std::multimap<double, OakThemeRawStyle*> ordering;
 	for(OakThemeRawStyle* style in _globalStyles)
 	{
-		double rank = 0;
-		if(style.scopeSelector.does_match(scope, &rank))
-			ordering.emplace(rank, style);
+		if(auto rank = style.scopeSelector.does_match(scope))
+			ordering.emplace(*rank, style);
 	}
 
 	for(OakThemeRawStyle* style in _themeStyles)
 	{
-		double rank = 0;
-		if(style.scopeSelector.does_match(scope, &rank))
-			ordering.emplace(rank, style);
+		if(auto rank = style.scopeSelector.does_match(scope))
+			ordering.emplace(*rank, style);
 	}
 
-	for(auto const pair : ordering)
+	for(auto pair : ordering)
 		[styles addObject:pair.second];
 
 	return [[OakThemeStyles alloc] initWithRawStyles:styles];

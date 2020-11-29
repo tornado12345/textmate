@@ -163,8 +163,8 @@ namespace ng
 
 	static index_t cap (buffer_api_t const& buffer, text::pos_t const& pos)
 	{
-		size_t line = oak::cap<size_t>(0, pos.line,   buffer.lines()-1);
-		size_t col  = oak::cap<size_t>(0, pos.column, buffer.eol(line) - buffer.begin(line));
+		size_t line = std::clamp<size_t>(pos.line,   0, buffer.lines()-1);
+		size_t col  = std::clamp<size_t>(pos.column, 0, buffer.eol(line) - buffer.begin(line));
 		index_t res = buffer.sanitize_index(buffer.convert(text::pos_t(line, col)));
 		if(pos.offset && res.index < buffer.size() && buffer[res.index] == "\n")
 			res.carry = pos.offset;
@@ -823,7 +823,7 @@ namespace ng
 				{
 					index = isLeftward ? range.min() : range.max();
 
-					static std::set<move_unit_type> const left_right = { kSelectionMoveLeft,  kSelectionMoveRight, kSelectionMoveFreehandedRight, kSelectionMoveFreehandedLeft                                                                                                           };
+					static std::set<move_unit_type> const left_right = { kSelectionMoveLeft,  kSelectionMoveRight, kSelectionMoveFreehandedRight, kSelectionMoveFreehandedLeft };
 					if(left_right.find(unit) != left_right.end())
 						unit = kSelectionMoveNowhere;
 				}
@@ -1052,7 +1052,6 @@ namespace ng
 				scope::scope_t rightScope = buffer.scope(to, false).right;
 				if(leftScope == rightScope)
 				{
-					// D(DBF_TextView_Internal, bug("select both sides: %s\n", to_s(leftScope).c_str()););
 					from = extend_scope_left(buffer, from, leftScope);
 					to   = extend_scope_right(buffer, to, rightScope);
 				}
@@ -1061,13 +1060,7 @@ namespace ng
 					scope::scope_t innerLeftScope  = buffer.scope(from, false).right;
 					scope::scope_t innerRightScope = buffer.scope(to, false).left;
 
-					// D(DBF_TextView_Internal, bug("%s\n", to_s(leftScope).c_str()););
-					// D(DBF_TextView_Internal, bug("%s\n", to_s(innerLeftScope).c_str()););
-					// D(DBF_TextView_Internal, bug("%s\n", to_s(innerRightScope).c_str()););
-					// D(DBF_TextView_Internal, bug("%s\n", to_s(rightScope).c_str()););
-
 					scope::scope_t scope = shared_prefix(shared_prefix(leftScope, innerLeftScope), shared_prefix(rightScope, innerRightScope));
-					// D(DBF_TextView_Internal, bug("→ %s\n", to_s(scope).c_str()););
 
 					from = extend_scope_left(buffer, from, scope);
 					to   = extend_scope_right(buffer, to, scope);
@@ -1077,7 +1070,6 @@ namespace ng
 					scope::scope_t scope = leftScope;
 					for(leftScope.pop_scope(); leftScope != rightScope; leftScope.pop_scope())
 						scope = leftScope;
-					// D(DBF_TextView_Internal, bug("select left side: %s\n", to_s(scope).c_str()););
 					from = extend_scope_left(buffer, from, scope);
 				}
 				else if(rightScope.has_prefix(leftScope))
@@ -1085,7 +1077,6 @@ namespace ng
 					scope::scope_t scope = rightScope;
 					for(rightScope.pop_scope(); rightScope != leftScope; rightScope.pop_scope())
 						scope = rightScope;
-					// D(DBF_TextView_Internal, bug("select right side: %s\n", to_s(scope).c_str()););
 					to = extend_scope_right(buffer, to, scope);
 				}
 				else if(from == to && buffer.convert(to).column == 0)
@@ -1094,9 +1085,7 @@ namespace ng
 				}
 				else
 				{
-					// D(DBF_TextView_Internal, bug("intersection: %s\n           != %s\n", to_s(leftScope).c_str(), to_s(rightScope).c_str()););
 					scope::scope_t const& scope = shared_prefix(leftScope, rightScope);
-					// D(DBF_TextView_Internal, bug("→ %s\n", to_s(scope).c_str()););
 					from = extend_scope_left(buffer, from, scope);
 					to   = extend_scope_right(buffer, to, scope);
 				}
@@ -1312,35 +1301,18 @@ namespace ng
 		ranges_t ranges = dissect_columnar(buffer, searchRanges);
 		find::find_t f(searchFor, (find::options_t)(options & ~find::backwards));
 
-		ssize_t total = 0;
-		buffer.visit_data([&](char const* buf, size_t, size_t len, bool*){
-			for(ssize_t offset = 0; offset < len; )
-			{
-				std::map<std::string, std::string> captures;
-				std::pair<ssize_t, ssize_t> const& m = f.match(buf + offset, len - offset, &captures);
-				if(m.first <= m.second)
-				{
-					range_t r(total + offset + m.first, total + offset + m.second, false, false, true);
-					if(is_subset(r, ranges))
-						res.emplace(r, captures);
-				}
-				ASSERT_NE(m.second, 0); ASSERT_LE(m.second, len - offset);
-				offset += m.second;
-			}
-			total += len;
+		std::map< range_t, std::map<std::string, std::string> >* tmp = new std::map< range_t, std::map<std::string, std::string> >();
+
+		buffer.visit_data([&](char const* buf, size_t offset, size_t len, bool*){
+			f.each_match(buf, len, offset + len < buffer.size(), [&tmp, &ranges](std::pair<size_t, size_t> const& m, std::map<std::string, std::string> const& captures){
+				range_t r(m.first, m.second, false, false, true);
+				if(is_subset(r, ranges))
+					tmp->emplace(r, captures);
+			});
 		});
 
-		std::map<std::string, std::string> captures;
-		std::pair<ssize_t, ssize_t> m = f.match(nullptr, 0, &captures);
-		while(m.first <= m.second)
-		{
-			range_t r(total + m.first, total + m.second, false, false, true);
-			if(is_subset(r, ranges))
-				res.emplace(r, captures);
-			captures.clear();
-			m = f.match(nullptr, 0, &captures);
-		}
-
+		res.swap(*tmp);
+		delete tmp;
 		return res;
 	}
 
@@ -1374,7 +1346,7 @@ namespace ng
 			}
 
 			if(m && range.sorted() != ng::range_t(m.begin(), m.end()))
-				res.emplace(ng::range_t(m.begin(), m.end()), m.captures());
+				res.emplace(ng::range_t(m.begin(), m.end(), false, false, true), m.captures());
 		}
 
 		return res;

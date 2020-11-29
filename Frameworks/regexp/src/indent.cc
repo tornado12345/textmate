@@ -4,22 +4,8 @@
 #include <oak/oak.h>
 #include <oak/debug.h>
 
-OAK_DEBUG_VAR(Indent);
-
 namespace indent
 {
-#ifndef NDEBUG
-	static std::string to_s (pattern_type type)
-	{
-		std::vector<std::string> v;
-		if(type & kIgnore)       v.push_back("kIgnore");
-		if(type & kDecrease)     v.push_back("kDecrease");
-		if(type & kIncrease)     v.push_back("kIncrease");
-		if(type & kIncreaseNext) v.push_back("kIncreaseNext");
-		if(type & kZeroIndent)   v.push_back("kZeroIndent");
-		return text::join(v, "|");
-	}
-#endif
 	std::string create (size_t size, size_t tabSize, bool softTabs)
 	{
 		return softTabs ? std::string(size, ' ') : std::string(size / tabSize, '\t') + std::string(size % tabSize, ' ');
@@ -49,7 +35,6 @@ namespace indent
 		else if(res & kIncrease)
 			res &= ~kIncreaseNext;
 
-		D(DBF_Indent, bug("%s\n", to_s((pattern_type)res).c_str()););
 		return res;
 	}
 
@@ -62,8 +47,6 @@ namespace indent
 
 	bool fsm_t::is_seeded (std::string const& line, std::map<pattern_type, regexp::pattern_t> const& patterns)
 	{
-		D(DBF_Indent, bug("%s\n", line.c_str()););
-
 		bool res = true;
 		size_t type = classify(line, patterns);
 		if(is_blank(line) || (type & (kIgnore|kZeroIndent)))
@@ -94,7 +77,6 @@ namespace indent
 			res = false;
 		}
 
-		D(DBF_Indent, bug("level %zd, carry %zd, is seeded %s\n", _level, _carry, BSTR(res)););
 		return res;
 	}
 
@@ -105,7 +87,6 @@ namespace indent
 
 	size_t fsm_t::scan_line (std::string const& line, std::map<pattern_type, regexp::pattern_t> const& patterns)
 	{
-		D(DBF_Indent, bug("%s\n", line.c_str()););
 		int type = classify(line, patterns);
 		ssize_t res = _level + _carry;
 		if(type & kZeroIndent)
@@ -125,7 +106,6 @@ namespace indent
 				_level += _indent_size;
 			_carry = type & kIncreaseNext ? _carry + _indent_size : 0;
 		}
-		D(DBF_Indent, bug("indent %zd (level %zd, carry %zd)\n", res < 0 ? 0 : res, _level, _carry););
 		return res < 0 ? 0 : res;
 	}
 

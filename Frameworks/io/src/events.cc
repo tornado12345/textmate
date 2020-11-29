@@ -3,33 +3,8 @@
 #include <cf/cf.h>
 #include <oak/debug.h>
 
-OAK_DEBUG_VAR(FS_Events);
-
 namespace
 {
-	struct device_info_t
-	{
-		dev_t device;
-		std::string mount_point;
-
-		device_info_t (std::string path)
-		{
-			while(true)
-			{
-				struct statfs buf;
-				if(statfs(path.c_str(), &buf) == 0)
-				{
-					device      = buf.f_fsid.val[0];
-					mount_point = buf.f_mntonname;
-					break;
-				}
-
-				ASSERT_EQ(errno, ENOENT);
-				path = path::parent(path);
-			}
-		}
-	};
-
 	bool operator== (timespec const& lhs, timespec const& rhs)
 	{
 		return lhs.tv_sec == rhs.tv_sec && lhs.tv_nsec == rhs.tv_nsec;
@@ -67,23 +42,34 @@ namespace
 		timespec _ctimespec;
 	};
 
+	static std::string real_path (std::string const& path)
+	{
+		if(char* tmp = realpath(path.c_str(), nullptr))
+		{
+			std::string str = tmp;
+			free(tmp);
+			return str;
+		}
+		return path;
+	}
+
 	struct events_t
 	{
 		struct stream_t
 		{
-			stream_t (std::string const& path, fs::event_callback_t* calback, uint64_t eventId, CFTimeInterval latency) : _requested(path), _observed(_requested), _callback(calback), _event_id(eventId), _replay(false)
+			stream_t (std::string const& path, fs::event_callback_t* calback, uint64_t eventId, CFTimeInterval latency) : _requested(path), _observed(real_path(path)), _callback(calback), _event_id(eventId), _replay(false)
 			{
-				while(!_observed.is_directory() && _observed.path() != "/")
-					_observed = file_info_t(path::parent(_observed.path()));
+				_requestedExists = true;
 
-				device_info_t devInfo(_observed.path());
-				_mount_point = devInfo.mount_point;
-				std::string devPath = path::relative_to(_observed.path(), devInfo.mount_point);
-				D(DBF_FS_Events, bug("watch ‘%s’ / ‘%s’ (device %x, event 0x%llx)\n", devInfo.mount_point.c_str(), devPath.c_str(), devInfo.device, _event_id););
+				while(!_observed.is_directory() && _observed.path() != "/")
+				{
+					_observed = file_info_t(path::parent(_observed.path()));
+					_requestedExists = false;
+				}
 
 				FSEventStreamContext contextInfo = { 0, this, nullptr, nullptr, nullptr };
-				if(!(_stream = FSEventStreamCreateRelativeToDevice(kCFAllocatorDefault, &events_t::callback, &contextInfo, devInfo.device, cf::wrap(std::vector<std::string>(1, devPath)), eventId, latency, kFSEventStreamCreateFlagNone)))
-					fprintf(stderr, "can’t observe ‘%s’\n", path.c_str());
+				if(!(_stream = FSEventStreamCreate(kCFAllocatorDefault, &events_t::callback, &contextInfo, cf::wrap(std::vector<std::string>(1, _observed.path())), eventId, latency, kFSEventStreamCreateFlagNone)))
+					os_log_error(OS_LOG_DEFAULT, "Can’t observe ‘%{public}s’", path.c_str());
 
 				_event_id = FSEventsGetCurrentEventId();
 			}
@@ -102,8 +88,6 @@ namespace
 			{
 				if(flag != _replay)
 				{
-					D(DBF_FS_Events, bug("%s, 0x%llx\n", BSTR(flag), eventId););
-
 					_replay = flag;
 					_event_id = std::max(eventId, _event_id);
 					_callback->set_replaying_history(flag, observedPath, flag ? eventId : _event_id);
@@ -113,13 +97,13 @@ namespace
 			explicit operator bool () const    { return _stream; }
 			operator FSEventStreamRef () const { return _stream; }
 
-			std::string _mount_point;
 			FSEventStreamRef _stream;
 			file_info_t _requested;
 			file_info_t _observed;
 			fs::event_callback_t* _callback;
 			uint64_t _event_id;
 			bool _replay;
+			bool _requestedExists;
 		};
 
 		typedef std::shared_ptr<stream_t> stream_ptr;
@@ -152,20 +136,24 @@ namespace
 				if((*stream)->_requested.path() == path && (*stream)->_callback == cb)
 					return (void)streams.erase(stream);
 			}
-			fprintf(stderr, "*** not watching ‘%s’\n", path.c_str());
+			os_log_error(OS_LOG_DEFAULT, "Not watching ‘%{public}s’", path.c_str());
 		}
 
 		static void callback (ConstFSEventStreamRef streamRef, void* clientCallBackInfo, size_t numEvents, void* eventPaths, FSEventStreamEventFlags const eventFlags[], FSEventStreamEventId const eventIds[])
 		{
 			stream_t& stream = *static_cast<stream_t*>(clientCallBackInfo);
-			D(DBF_FS_Events, bug("%zu events\n", numEvents););
-
 			uint64_t lastEventId = 0;
 			for(size_t i = 0; i < numEvents; ++i)
 			{
-				std::string path = path::join(stream._mount_point, ((char const* const*)eventPaths)[i]);
+				std::string path = ((char const* const*)eventPaths)[i];
 				std::string const& requestedPath = stream._requested.path();
-				D(DBF_FS_Events, bug("%zu/%zu) 0x%llx: %s%s%s%s\n", i+1, numEvents, eventIds[i], path.c_str(), (eventFlags[i] & kFSEventStreamEventFlagMustScanSubDirs) ? ", recursive" : "", (eventFlags[i] & kFSEventStreamEventFlagHistoryDone) ? ", history done" : "", stream._replay ? " (replay history)" : ""););
+
+				if(stream._requestedExists && requestedPath != stream._observed.path())
+					path = path::join(requestedPath, path::relative_to(path, stream._observed.path()));
+
+				if(path.size() > 1 && path.back() == '/')
+					path.erase(path.size()-1, 1);
+
 				if(eventFlags[i] & kFSEventStreamEventFlagHistoryDone)
 				{
 					ASSERT(stream._replay);
@@ -238,13 +226,11 @@ namespace fs
 
 	void watch (std::string const& path, event_callback_t* callback, uint64_t eventId, CFTimeInterval latency)
 	{
-		D(DBF_FS_Events, bug("%s, %p\n", path.c_str(), callback););
 		events().watch(path, callback, eventId, latency);
 	}
 
 	void unwatch (std::string const& path, event_callback_t* callback)
 	{
-		D(DBF_FS_Events, bug("%s, %p\n", path.c_str(), callback););
 		events().unwatch(path, callback);
 	}
 

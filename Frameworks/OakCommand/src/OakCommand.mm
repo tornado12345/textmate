@@ -10,7 +10,7 @@
 #import <text/trim.h>
 #import <text/encode.h>
 #import <text/parse.h>
-#import <command/runner.h> // bundle_command_t, fix_shebang
+#import <command/runner.h> // bundle_command_t, fix_shebang, create_script_path
 #import <bundles/wrappers.h>
 #import <regexp/format_string.h>
 #import <OakAppKit/OakToolTip.h>
@@ -20,8 +20,8 @@
 #import <settings/settings.h>
 #import <BundleEditor/BundleEditor.h>
 
-NSString* const OakCommandDidTerminateNotification = @"OakCommandDidTerminateNotification";
-NSString* const OakCommandErrorDomain              = @"com.macromates.TextMate.ErrorDomain";
+NSNotificationName const OakCommandDidTerminateNotification = @"OakCommandDidTerminateNotification";
+NSString* const OakCommandErrorDomain                       = @"com.macromates.TextMate.ErrorDomain";
 
 static NSString* const kOakFileHandleURLScheme = @"x-txmt-filehandle";
 
@@ -56,7 +56,7 @@ static std::tuple<pid_t, int, int> my_fork (char const* cmd, int inputRead, std:
 			else
 			{
 				newEnv.emplace(pair.first, "(truncated)");
-				fprintf(stderr, "*** variable exceeds ARG_MAX: %s\n", pair.first.c_str());
+				os_log_error(OS_LOG_DEFAULT, "Variable exceeds ARG_MAX: %{public}s", pair.first.c_str());
 			}
 		}
 		return my_fork(cmd, inputRead, newEnv, workingDir);
@@ -228,7 +228,7 @@ static pid_t run_command (dispatch_group_t rootGroup, std::string const& cmd, in
 
 			static NSInteger UniqueKey = 0; // Make each URL unique to avoid caching
 
-			_urlRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"%@://job/%@/%ld", kOakFileHandleURLScheme, to_ns(encode::url_part(_bundleCommand.name)), ++UniqueKey]] cachePolicy:NSURLRequestReloadIgnoringCacheData timeoutInterval:6000];
+			_urlRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"%@://job/%@/%ld", kOakFileHandleURLScheme, to_ns(encode::url_part(_bundleCommand.name)), ++UniqueKey]] cachePolicy:NSURLRequestReloadIgnoringCacheData timeoutInterval:FLT_MAX];
 			[NSURLProtocol setProperty:self.identifier forKey:@"commandIdentifier" inRequest:_urlRequest];
 			[NSURLProtocol setProperty:pipe.fileHandleForReading forKey:@"fileHandle" inRequest:_urlRequest];
 			[NSURLProtocol setProperty:@(_processIdentifier) forKey:@"processIdentifier" inRequest:_urlRequest];
@@ -364,13 +364,12 @@ static pid_t run_command (dispatch_group_t rootGroup, std::string const& cmd, in
 	auto htmlOutHandler = ^(char const* bytes, size_t len) { [self writeHTMLOutput:bytes length:len]; };
 
 	std::string const directory = format_string::expand("${TM_DIRECTORY:-${TM_PROJECT_DIRECTORY:-$TMPDIR}}", _environment);
-	std::string scriptPath = path::temp("command", _bundleCommand.command);
+	std::string const scriptPath = command::create_script_path(_bundleCommand.command);
 	ASSERT(scriptPath != NULL_STR);
 
 	__block BOOL didTerminate = NO;
 	_processIdentifier = run_command(_dispatchGroup, scriptPath, inputFH.fileDescriptor, _environment, directory, CFRunLoopGetCurrent(), hasHTMLOutput ? htmlOutHandler : stdoutHandler, stderrHandler, ^(int status) {
 		_processIdentifier = 0;
-		unlink(scriptPath.c_str());
 
 		std::string newOut, newErr;
 		oak::replace_copy(out.begin(), out.end(), scriptPath.begin(), scriptPath.end(), _bundleCommand.name.begin(), _bundleCommand.name.end(), back_inserter(newOut));
@@ -379,9 +378,9 @@ static pid_t run_command (dispatch_group_t rootGroup, std::string const& cmd, in
 		newErr.swap(err);
 
 		if(WIFSIGNALED(status))
-			fprintf(stderr, "*** process terminated: %s\n", strsignal(WTERMSIG(status)));
+			os_log_error(OS_LOG_DEFAULT, "Process terminated after receiving %{public}s", strsignal(WTERMSIG(status)));
 		else if(!WIFEXITED(status))
-			fprintf(stderr, "*** process terminated abnormally %d\n", status);
+			os_log_error(OS_LOG_DEFAULT, "Process terminated abnormally %d", status);
 
 		output::type placement         = _bundleCommand.output;
 		output_format::type format     = _bundleCommand.output_format;
@@ -491,7 +490,7 @@ static pid_t run_command (dispatch_group_t rootGroup, std::string const& cmd, in
 		// Wake potential event loop
 		didTerminate = YES;
 		[NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0 context:NULL subtype:0 data1:0 data2:0] atStart:NO];
-		[[NSNotificationCenter defaultCenter] postNotificationName:OakCommandDidTerminateNotification object:self];
+		[NSNotificationCenter.defaultCenter postNotificationName:OakCommandDidTerminateNotification object:self];
 	});
 
 	if(_bundleCommand.output == output::new_window && _bundleCommand.output_format == output_format::html)
@@ -527,7 +526,7 @@ static pid_t run_command (dispatch_group_t rootGroup, std::string const& cmd, in
 		case OakCommandRequirementsMissingError:
 		{
 			if(recoveryOptionIndex == 1)
-				[[NSWorkspace sharedWorkspace] openURL:error.userInfo[@"moreInfoURL"]];
+				[NSWorkspace.sharedWorkspace openURL:error.userInfo[@"moreInfoURL"]];
 		}
 		break;
 
@@ -535,8 +534,7 @@ static pid_t run_command (dispatch_group_t rootGroup, std::string const& cmd, in
 		{
 			if(recoveryOptionIndex == 1)
 			{
-				Class cl = NSClassFromString(@"BundleEditor");
-				[[cl sharedInstance] revealBundleItem:bundles::lookup(_bundleCommand.uuid)];
+				[BundleEditor.sharedInstance revealBundleItem:bundles::lookup(_bundleCommand.uuid)];
 			}
 			else if(recoveryOptionIndex == 2)
 			{

@@ -1,12 +1,10 @@
-#include <oak/misc.h>
+NSMutableAttributedString* CreateAttributedStringWithMarkedUpRanges (std::string const& in, std::vector< std::pair<size_t, size_t> > const& ranges, NSLineBreakMode lineBreakMode = NSLineBreakByTruncatingMiddle);
 
-PUBLIC NSMutableAttributedString* CreateAttributedStringWithMarkedUpRanges (std::string const& in, std::vector< std::pair<size_t, size_t> > const& ranges, NSLineBreakMode lineBreakMode = NSLineBreakByTruncatingMiddle);
-
-PUBLIC @interface OakFileTableCellView : NSTableCellView
+@interface OakFileTableCellView : NSTableCellView
 - (instancetype)initWithCloseButton:(NSButton*)closeButton;
 @end
 
-PUBLIC @interface OakChooser : NSWindowController
+@interface OakChooser : NSWindowController
 @property (nonatomic) SEL action;
 @property (nonatomic, weak) id target;
 
@@ -23,7 +21,6 @@ PUBLIC @interface OakChooser : NSWindowController
 @property (nonatomic, readonly) NSVisualEffectView* footerView;
 @property (nonatomic, readonly) NSTextField*        statusTextField;
 @property (nonatomic, readonly) NSTextField*        itemCountTextField;
-- (NSBox*)makeDividerView;
 - (void)addTitlebarAccessoryView:(NSView*)titlebarView;
 - (void)updateScrollViewInsets;
 

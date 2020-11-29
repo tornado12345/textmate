@@ -1,15 +1,5 @@
-#import <MASPreferences/MASPreferencesViewController.h>
+#import "Preferences.h"
 
-@interface VariablesPreferences : NSViewController <MASPreferencesViewController>
-{
-	IBOutlet NSTableView* variablesTableView;
-}
-@property (nonatomic, readonly) NSString* viewIdentifier;
-@property (nonatomic, readonly) NSImage*  toolbarItemImage;
-@property (nonatomic, readonly) NSString* toolbarItemLabel;
-
-@property (nonatomic) BOOL canRemove;
-
-- (IBAction)addVariable:(id)sender;
-- (IBAction)delete:(id)sender;
+@interface VariablesPreferences : NSViewController <PreferencesPaneProtocol>
+@property (nonatomic, readonly) NSImage* toolbarItemImage;
 @end

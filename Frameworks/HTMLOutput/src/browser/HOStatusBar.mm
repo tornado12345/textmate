@@ -5,7 +5,7 @@
 static NSButton* OakCreateImageButton (NSImage* image)
 {
 	NSButton* res = [NSButton new];
-	[res setButtonType:NSMomentaryChangeButton];
+	[res setButtonType:NSButtonTypeMomentaryChange];
 	[res setBordered:NO];
 	[res setImage:image];
 	[res setImagePosition:NSImageOnly];
@@ -25,6 +25,7 @@ static NSTextField* OakCreateTextField ()
 }
 
 @interface HOStatusBar ()
+@property (nonatomic) NSView*              topDivider;
 @property (nonatomic) NSView*              divider;
 @property (nonatomic) NSButton*            goBackButton;
 @property (nonatomic) NSButton*            goForwardButton;
@@ -47,7 +48,8 @@ static NSTextField* OakCreateTextField ()
 
 		_indeterminateProgress = YES;
 
-		_divider                  = OakCreateDividerImageView();
+		_topDivider               = OakCreateNSBoxSeparator();
+		_divider                  = OakCreateNSBoxSeparator();
 
 		_goBackButton             = OakCreateImageButton([NSImage imageNamed:NSImageNameGoLeftTemplate]);
 		_goBackButton.toolTip     = @"Show the previous page";
@@ -74,20 +76,15 @@ static NSTextField* OakCreateTextField ()
 
 		_spinner = [NSProgressIndicator new];
 		_spinner.controlSize          = NSControlSizeSmall;
-		_spinner.style                = NSProgressIndicatorSpinningStyle;
+		_spinner.style                = NSProgressIndicatorStyleSpinning;
 		_spinner.displayedWhenStopped = NO;
 
-		NSArray* views = @[ _divider, _goBackButton, _goForwardButton, _statusTextField, _spinner ];
+		NSArray* views = @[ _topDivider, _divider, _goBackButton, _goForwardButton, _statusTextField, _spinner ];
 		OakAddAutoLayoutViewsToSuperview(views, self);
 
 		[_progressIndicator setTranslatesAutoresizingMaskIntoConstraints:NO];
 	}
 	return self;
-}
-
-- (NSSize)intrinsicContentSize
-{
-	return NSMakeSize(NSViewNoInstrinsicMetric, 24);
 }
 
 - (void)updateConstraints
@@ -99,21 +96,21 @@ static NSTextField* OakCreateTextField ()
 	[super updateConstraints];
 
 	NSDictionary* views = @{
-		@"back":    _goBackButton,
-		@"forward": _goForwardButton,
-		@"divider": _divider,
-		@"status":  _statusTextField,
-		@"spinner": _indeterminateProgress ? _spinner : _progressIndicator,
+		@"topDivider": _topDivider,
+		@"back":       _goBackButton,
+		@"forward":    _goForwardButton,
+		@"divider":    _divider,
+		@"status":     _statusTextField,
+		@"spinner":    _indeterminateProgress ? _spinner : _progressIndicator,
 	};
 
 	NSArray* layout = @[
-		@"H:|-(3)-[back(==22)]-(2)-[forward(==back)]-(2)-[divider]",
-		@"V:|[back(==forward,==divider)]|", @"V:|[forward]|", @"V:|[divider]|",
-		@"V:[status]-5-|",
+		@"H:|[topDivider]|", @"V:|[topDivider(==1)]-4-[divider(==15)]-5-|", @"V:[status]-5-|"
 	];
 
 	for(NSString* str in layout)
 		[_layoutConstraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:str options:0 metrics:nil views:views]];
+	[_layoutConstraints addObjectsFromArray:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(3)-[back(==22)]-(2)-[forward(==back)]-(2)-[divider(==1)]" options:NSLayoutFormatAlignAllCenterY metrics:nil views:views]];
 
 	if(!_indeterminateProgress)
 	{

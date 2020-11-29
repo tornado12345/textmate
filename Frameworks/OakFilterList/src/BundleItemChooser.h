@@ -1,8 +1,8 @@
 #import "OakChooser.h"
 #import <scope/scope.h>
 
-PUBLIC @interface BundleItemChooser : OakChooser
-+ (instancetype)sharedInstance;
+@interface BundleItemChooser : OakChooser
+@property (class, readonly) BundleItemChooser* sharedInstance;
 @property (nonatomic) NSString* path;
 @property (nonatomic) NSString* directory;
 @property (nonatomic) scope::context_t scope;

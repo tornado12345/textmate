@@ -135,16 +135,13 @@ static NSTextView* MyCreateTextView ()
 }
 
 @interface EncodingContentView : NSView
-{
-	OBJC_WATCH_LEAKS(EncodingContentView);
-}
 @property (nonatomic) id delegate;
 @end
 
 @implementation EncodingContentView
 - (NSSize)intrinsicContentSize
 {
-	return NSMakeSize(NSViewNoInstrinsicMetric, NSViewNoInstrinsicMetric);
+	return NSMakeSize(NSViewNoIntrinsicMetric, NSViewNoIntrinsicMetric);
 }
 
 - (void)updateConstraints
@@ -156,7 +153,6 @@ static NSTextView* MyCreateTextView ()
 
 @interface EncodingWindowController () <NSWindowDelegate, NSTextViewDelegate>
 {
-	OBJC_WATCH_LEAKS(EncodingWindowController);
 	NSData* _data;
 }
 @property (nonatomic) NSObjectController* objectController;

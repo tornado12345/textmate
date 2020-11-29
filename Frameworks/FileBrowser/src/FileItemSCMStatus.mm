@@ -37,8 +37,8 @@
 			if(repository.enabled)
 			{
 				handler(@[
-					[NSURL URLWithString:[NSString stringWithFormat:@"scm://localhost%@/?show=unstaged", [repository.URL.path stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]]],
-					[NSURL URLWithString:[NSString stringWithFormat:@"scm://localhost%@/?show=untracked", [repository.URL.path stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]]],
+					[NSURL URLWithString:[NSString stringWithFormat:@"scm://localhost%@/?show=unstaged", [repository.URL.path stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLPathAllowedCharacterSet]]],
+					[NSURL URLWithString:[NSString stringWithFormat:@"scm://localhost%@/?show=untracked", [repository.URL.path stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLPathAllowedCharacterSet]]],
 				]);
 			}
 		}
@@ -183,9 +183,8 @@
 {
 	if(_repository)
 	{
-		auto const variables = _repository.variables;
-		auto const branch    = variables.find("TM_SCM_BRANCH");
-		self.disambiguationSuffix = branch != variables.end() ? [NSString stringWithFormat:@" (%@)", to_ns(branch->second)] : @"";
+		NSString* branch = _repository.variables[@"TM_SCM_BRANCH"];
+		self.disambiguationSuffix = branch ? [NSString stringWithFormat:@" (%@)", branch] : @"";
 	}
 }
 
@@ -211,7 +210,7 @@
 - (NSURL*)parentURL
 {
 	if([self.URL.query hasSuffix:@"unstaged"] || [self.URL.query hasSuffix:@"untracked"])
-		return [NSURL URLWithString:[NSString stringWithFormat:@"scm://localhost%@/", [self.URL.path stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]]];
+		return [NSURL URLWithString:[NSString stringWithFormat:@"scm://localhost%@/", [self.URL.path stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLPathAllowedCharacterSet]]];
 	return [NSURL fileURLWithPath:self.URL.path];
 }
 @end

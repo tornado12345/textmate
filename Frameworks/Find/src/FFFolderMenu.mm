@@ -14,7 +14,7 @@ static NSMutableArray* FoldersAtPath (NSString* folder)
 	ASSERT(folder && [folder length] > 0);
 	NSMutableArray* res = [NSMutableArray array];
 	BOOL isDirectory = NO;
-	if(![[NSFileManager defaultManager] fileExistsAtPath:folder isDirectory:&isDirectory] || isDirectory == NO)
+	if(![NSFileManager.defaultManager fileExistsAtPath:folder isDirectory:&isDirectory] || isDirectory == NO)
 		return res;
 
 	std::string const startPath = to_s(folder);
@@ -28,7 +28,7 @@ static NSMutableArray* FoldersAtPath (NSString* folder)
 				continue;
 
 			NSString* folderPath = [NSString stringWithCxxString:path];
-			if(![[NSWorkspace sharedWorkspace] isFilePackageAtPath:folderPath])
+			if(![NSWorkspace.sharedWorkspace isFilePackageAtPath:folderPath])
 				[res addObject:folderPath];
 		}
 	}
@@ -46,13 +46,14 @@ static NSMutableArray* FoldersAtPath (NSString* folder)
 	return sharedInstance;
 }
 
-+ (void)addFolderSubmenuToMenuItem:(NSMenuItem*)aMenuItem
++ (void)addSubmenuForDirectoryAtPath:(NSString*)path toMenuItem:(NSMenuItem*)aMenuItem
 {
-	[[self sharedInstance] addFolderSubmenuToMenuItem:aMenuItem];
+	[FFFolderMenu.sharedInstance addSubmenuForDirectoryAtPath:path toMenuItem:aMenuItem];
 }
 
-- (void)addFolderSubmenuToMenuItem:(NSMenuItem*)aMenuItem
+- (void)addSubmenuForDirectoryAtPath:(NSString*)path toMenuItem:(NSMenuItem*)aMenuItem
 {
+	aMenuItem.representedObject = path;
 	aMenuItem.submenu = [NSMenu new];
 	aMenuItem.submenu.delegate = self;
 }
@@ -64,33 +65,38 @@ static NSMutableArray* FoldersAtPath (NSString* folder)
 		return;
 
 	NSString* folder = [parentItem representedObject] ?: NSHomeDirectory();
-	if([parentItem parentItem] == nil) // root menu, show parent folders
+	for(NSString* path in FoldersAtPath(folder))
 	{
-		BOOL hasSubfolders = [FoldersAtPath(folder) count];
-		for(NSString* path = folder; OakNotEmptyString(path); path = [path stringByDeletingLastPathComponent])
+		NSMenuItem* menuItem = [aMenu addItemWithTitle:[NSFileManager.defaultManager displayNameAtPath:path] action:parentItem.action keyEquivalent:@""];
+		[menuItem setTarget:parentItem.target];
+		[menuItem setIconForFile:path];
+
+		if([FoldersAtPath(path) count])
+			[self addSubmenuForDirectoryAtPath:path toMenuItem:menuItem];
+	}
+
+	if(![parentItem parentItem] && ![folder isEqualToString:@"/"]) // Add enclosing folders to root menu
+	{
+		if(aMenu.numberOfItems)
+			[aMenu addItem:[NSMenuItem separatorItem]];
+		[aMenu addItemWithTitle:@"Enclosing Folders" action:@selector(nop:) keyEquivalent:@""];
+
+		BOOL immediateParent = YES;
+		for(NSString* path = folder.stringByDeletingLastPathComponent; OakNotEmptyString(path); path = path.stringByDeletingLastPathComponent)
 		{
-			NSMenuItem* menuItem = [aMenu addItemWithTitle:[[NSFileManager defaultManager] displayNameAtPath:path] action:parentItem.action keyEquivalent:@""];
-			[menuItem setTarget:parentItem.target];
+			NSString* shortcut = immediateParent ? @"\uF700" : @"";
+			SEL action = immediateParent ? @selector(goToParentFolder:) : parentItem.action;
+			id target  = immediateParent ? nil : parentItem.target;
+
+			NSMenuItem* menuItem = [aMenu addItemWithTitle:[NSFileManager.defaultManager displayNameAtPath:path] action:action keyEquivalent:shortcut];
+			[menuItem setTarget:target];
 			[menuItem setRepresentedObject:path];
 			[menuItem setIconForFile:path];
-			if(std::exchange(hasSubfolders, YES))
-				[self addFolderSubmenuToMenuItem:menuItem];
 
 			if([path isEqualToString:@"/"])
 				break;
-		}
-	}
-	else
-	{
-		for(NSString* path in FoldersAtPath(folder))
-		{
-			NSMenuItem* menuItem = [aMenu addItemWithTitle:[[NSFileManager defaultManager] displayNameAtPath:path] action:parentItem.action keyEquivalent:@""];
-			[menuItem setTarget:parentItem.target];
-			[menuItem setRepresentedObject:path];
-			[menuItem setIconForFile:path];
 
-			if([FoldersAtPath(path) count])
-				[self addFolderSubmenuToMenuItem:menuItem];
+			immediateParent = NO;
 		}
 	}
 }

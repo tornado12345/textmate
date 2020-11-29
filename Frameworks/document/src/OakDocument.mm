@@ -3,9 +3,9 @@
 #import "OakDocumentEditor.h"
 #import "EncodingView.h"
 #import "Printing.h"
-#import "watch.h"
 #import "merge.h"
 #import <FileBrowser/FileItemImage.h>
+#import <FileBrowser/KEventManager.h>
 #import <OakFoundation/OakFoundation.h>
 #import <OakFoundation/NSString Additions.h>
 #import <OakAppKit/OakEncodingPopUpButton.h>
@@ -103,8 +103,8 @@ namespace document
 
 		static ng::index_t cap (ng::buffer_t const& buf, text::pos_t const& pos)
 		{
-			size_t line = oak::cap<size_t>(0, pos.line,   buf.lines()-1);
-			size_t col  = oak::cap<size_t>(0, pos.column, buf.eol(line) - buf.begin(line));
+			size_t line = std::clamp<size_t>(pos.line,   0, buf.lines()-1);
+			size_t col  = std::clamp<size_t>(pos.column, 0, buf.eol(line) - buf.begin(line));
 			ng::index_t res = buf.sanitize_index(buf.convert(text::pos_t(line, col)));
 			if(pos.offset && res.index < buf.size() && buf[res.index] == "\n")
 				res.carry = pos.offset;
@@ -159,20 +159,18 @@ namespace document
 // = OakDocument Implementation =
 // ==============================
 
-NSString* OakDocumentContentDidChangeNotification = @"OakDocumentContentDidChangeNotification";
-NSString* OakDocumentMarksDidChangeNotification   = @"OakDocumentMarksDidChangeNotification";
-NSString* OakDocumentWillReloadNotification       = @"OakDocumentWillReloadNotification";
-NSString* OakDocumentDidReloadNotification        = @"OakDocumentDidReloadNotification";
-NSString* OakDocumentWillSaveNotification         = @"OakDocumentWillSaveNotification";
-NSString* OakDocumentDidSaveNotification          = @"OakDocumentDidSaveNotification";
-NSString* OakDocumentWillCloseNotification        = @"OakDocumentWillCloseNotification";
-NSString* OakDocumentWillShowAlertNotification    = @"OakDocumentWillShowAlertNotification";
-NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
+NSNotificationName const OakDocumentContentDidChangeNotification = @"OakDocumentContentDidChangeNotification";
+NSNotificationName const OakDocumentMarksDidChangeNotification   = @"OakDocumentMarksDidChangeNotification";
+NSNotificationName const OakDocumentWillReloadNotification       = @"OakDocumentWillReloadNotification";
+NSNotificationName const OakDocumentDidReloadNotification        = @"OakDocumentDidReloadNotification";
+NSNotificationName const OakDocumentWillSaveNotification         = @"OakDocumentWillSaveNotification";
+NSNotificationName const OakDocumentDidSaveNotification          = @"OakDocumentDidSaveNotification";
+NSNotificationName const OakDocumentWillCloseNotification        = @"OakDocumentWillCloseNotification";
+NSNotificationName const OakDocumentWillShowAlertNotification    = @"OakDocumentWillShowAlertNotification";
+NSString* OakDocumentBookmarkIdentifier                          = @"bookmark";
 
 @interface OakDocument ()
 {
-	OBJC_WATCH_LEAKS(OakDocument);
-
 	NSHashTable* _documentEditors;
 	scm::status::type _scmStatus;
 	NSImage* _icon;
@@ -185,7 +183,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	ng::callback_t* _callback;
 
 	std::unique_ptr<ng::undo_manager_t> _undoManager;
-	std::unique_ptr<document::watch_base_t> _fileSystemObserver;
+	id _fileSystemObserver;
 
 	NSTimer* _backupTimer;
 }
@@ -438,7 +436,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	if(_path)
 	{
 		if(!_cachedDisplayName)
-			_cachedDisplayName = [[NSFileManager defaultManager] displayNameAtPath:_path];
+			_cachedDisplayName = [NSFileManager.defaultManager displayNameAtPath:_path];
 		return _cachedDisplayName;
 	}
 
@@ -565,7 +563,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	[_backupTimer invalidate];
 	_backupTimer = _keepBackupFile ? [NSTimer scheduledTimerWithTimeInterval:kDocumentBackupDelay target:self selector:@selector(backupTimerDidFire:) userInfo:nil repeats:NO] : nil;
 
-	[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentContentDidChangeNotification object:self];
+	[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentContentDidChangeNotification object:self];
 }
 
 - (void)setKeepBackupFile:(BOOL)flag
@@ -588,7 +586,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 
 	if(_backupPath)
 	{
-		[[NSFileManager defaultManager] removeItemAtPath:_backupPath error:nullptr];
+		[NSFileManager.defaultManager removeItemAtPath:_backupPath error:nullptr];
 		self.backupPath = nil;
 	}
 }
@@ -596,7 +594,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 - (NSString*)createAndReturnBackupPath
 {
 	NSString* path = [[NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject] stringByAppendingPathComponent:@"TextMate/Session"];
-	if(![[NSFileManager defaultManager] createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nullptr])
+	if(![NSFileManager.defaultManager createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nullptr])
 		return nil;
 
 	path = [path stringByAppendingPathComponent:[self displayNameWithExtension:YES]];
@@ -672,7 +670,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	NSURL* url = [NSURL fileURLWithPath:_path];
 	CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, ^{
 		// This is not thread-safe so we ensure that we are on the main thread
-		[[NSDocumentController sharedDocumentController] noteNewRecentDocumentURL:url];
+		[NSDocumentController.sharedDocumentController noteNewRecentDocumentURL:url];
 	});
 }
 
@@ -720,7 +718,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 			if(!probabilities.empty() && probabilities.begin()->first < 1)
 				controller.encoding = [NSString stringWithCxxString:probabilities.begin()->second];
 
-			[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentWillShowAlertNotification object:_self];
+			[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentWillShowAlertNotification object:_self];
 			[controller beginSheetModalForWindow:_window completionHandler:^(NSModalResponse response){
 				if(response != NSModalResponseCancel)
 				{
@@ -856,7 +854,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	if(_buffer)
 	{
 		self.observeFileSystem = NO;
-		[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentWillSaveNotification object:self];
+		[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentWillSaveNotification object:self];
 
 		encoding::type encoding = encoding::type(to_s(_diskNewlines), to_s(_diskEncoding));
 
@@ -901,9 +899,9 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 				if(!_window)
 					return;
 
-				[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentWillShowAlertNotification object:_document];
+				[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentWillShowAlertNotification object:_document];
 				NSAlert* alert = [NSAlert tmAlertWithMessageText:[NSString stringWithFormat:@"The file “%@” is locked.", _document.displayName] informativeText:@"Do you want to overwrite it anyway?" buttons:@"Overwrite", @"Cancel", nil];
-				[alert beginSheetModalForWindow:_window completionHandler:^(NSInteger returnCode){
+				[alert beginSheetModalForWindow:_window completionHandler:^(NSModalResponse returnCode){
 					if(returnCode == NSAlertFirstButtonReturn)
 							context->set_make_writable(true);
 					else	_cancel = true;
@@ -915,9 +913,9 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 				if(!_window)
 					return;
 
-				[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentWillShowAlertNotification object:_document];
+				[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentWillShowAlertNotification object:_document];
 				NSAlert* alert = [NSAlert tmAlertWithMessageText:[NSString stringWithFormat:@"No parent folder for “%@”.", _document.displayName] informativeText:[NSString stringWithFormat:@"Do you wish to create a folder at “%@”?", [NSString stringWithCxxString:path::with_tilde(path::parent(path))]] buttons:@"Create Folder", @"Cancel", nil];
-				[alert beginSheetModalForWindow:_window completionHandler:^(NSInteger returnCode){
+				[alert beginSheetModalForWindow:_window completionHandler:^(NSModalResponse returnCode){
 					if(returnCode == NSAlertFirstButtonReturn)
 							context->set_create_parent(true);
 					else	_cancel = true;
@@ -941,11 +939,11 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 					if(!_window)
 						return;
 
-					[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentWillShowAlertNotification object:_document];
+					[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentWillShowAlertNotification object:_document];
 					NSAlert* alert = [NSAlert tmAlertWithMessageText:[NSString stringWithFormat:@"Unable to save “%@” using “%@” as encoding.", _document.displayName, to_ns(charset)] informativeText:@"Please choose another encoding:" buttons:@"Save", @"Cancel", nil];
 					OakEncodingPopUpButton* encodingPopUp = [OakEncodingPopUpButton new];
 					[alert setAccessoryView:encodingPopUp];
-					[alert beginSheetModalForWindow:_window completionHandler:^(NSInteger returnCode){
+					[alert beginSheetModalForWindow:_window completionHandler:^(NSModalResponse returnCode){
 						if(returnCode == NSAlertFirstButtonReturn)
 								context->set_charset(to_s(encodingPopUp.encoding));
 						else	_cancel = true;
@@ -988,7 +986,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 					[self removeBackup];
 					[self updateRecentDocumentMenu];
 
-					[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentDidSaveNotification object:self];
+					[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentDidSaveNotification object:self];
 				}
 			}
 			self.observeFileSystem = self.isLoaded;
@@ -1008,7 +1006,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	}
 	else
 	{
-		NSString* errorMessage = [NSString stringWithFormat:@"Cannot save ‘%@’: no content. Has backup %s, is edited %s.", self.displayName, BSTR(_backupPath), BSTR(self.isDocumentEdited)];
+		NSString* errorMessage = [NSString stringWithFormat:@"Cannot save ‘%@’: no content. Has backup %s, is edited %s.", self.displayName, _backupPath ? "YES" : "NO", self.isDocumentEdited ? "YES" : "NO"];
 		block(OakDocumentIOResultFailure, errorMessage, oak::uuid_t());
 	}
 }
@@ -1020,7 +1018,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	if(--self.openCount != 0)
 		return;
 
-	[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentWillCloseNotification object:self];
+	[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentWillCloseNotification object:self];
 
 	if(_path && _buffer)
 	{
@@ -1057,7 +1055,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 		void will_replace (size_t from, size_t to, char const* buf, size_t len)
 		{
 			ng::buffer_t const& buffer = [_self buffer];
-			_should_sniff_file_type = from == oak::cap(buffer.begin(0), from, buffer.eol(0)) && _self.shouldSniffFileType;
+			_should_sniff_file_type = from == std::clamp(from, buffer.begin(0), buffer.eol(0)) && _self.shouldSniffFileType;
 			_file_type = _should_sniff_file_type ? file_type(buffer) : NULL_STR;
 		}
 
@@ -1199,7 +1197,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	std::string const firstLine = _buffer ? _buffer->substr(_buffer->begin(0), std::min<size_t>(_buffer->eol(0), 2048)) : NULL_STR;
 	std::string const path      = to_s(_virtualPath ?: _path);
 
-	for(Bundle* bundle in [BundlesManager sharedInstance].bundles)
+	for(Bundle* bundle in BundlesManager.sharedInstance.bundles)
 	{
 		for(BundleGrammar* grammar in bundle.grammars)
 		{
@@ -1324,18 +1322,12 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 
 - (NSArray<OakDocumentMatch*>*)matchesForString:(NSString*)searchString options:(find::options_t)options bufferSize:(NSUInteger*)bufferSize
 {
-	struct range_match_t
-	{
-		range_match_t (ssize_t from, ssize_t to, std::map<std::string, std::string> const& captures) : from(from), to(to), captures(captures) { }
-
-		ssize_t from, to;
-		std::map<std::string, std::string> captures;
-	};
+	NSMutableArray<OakDocumentMatch*>* results = [NSMutableArray array];
 
 	__block find::find_t f(to_s(searchString), options | (self.isLoaded == NO && (options & find::regular_expression) ? find::filesize_limit : find::none));
-	__block std::vector<range_match_t> ranges;
 	__block boost::crc_32_type crc32;
 	__block size_t total = 0;
+
 	[self enumerateByteRangesUsingBlock:^(char const* bytes, NSRange byteRange, BOOL* stop){
 		if(memchr(bytes, '\0', byteRange.length)) // searchBinaryFiles == NO
 		{
@@ -1343,33 +1335,30 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 			return;
 		}
 
-		for(ssize_t offset = 0; offset < byteRange.length; )
-		{
-			std::map<std::string, std::string> captures;
-			std::pair<ssize_t, ssize_t> const& m = f.match(bytes + offset, byteRange.length - offset, &captures);
-			if(m.first <= m.second)
-				ranges.emplace_back(byteRange.location + offset + m.first, byteRange.location + offset + m.second, captures);
-			ASSERT_NE(m.second, 0); ASSERT_LE(m.second, byteRange.length - offset);
-			offset += m.second;
-		}
+		f.each_match(bytes, byteRange.length, true /* more data */, [&results](std::pair<size_t, size_t> const& m, std::map<std::string, std::string> const& captures){
+			OakDocumentMatch* match = [OakDocumentMatch new];
+			match.first    = m.first;
+			match.last     = m.second;
+			match.captures = captures;
+			[results addObject:match];
+		});
 
 		crc32.process_bytes(bytes, byteRange.length);
 		total = NSMaxRange(byteRange);
 	}];
 
+	f.each_match(nullptr, 0, false /* no more data */, [&results](std::pair<size_t, size_t> const& m, std::map<std::string, std::string> const& captures){
+		OakDocumentMatch* match = [OakDocumentMatch new];
+		match.first    = m.first;
+		match.last     = m.second;
+		match.captures = captures;
+		[results addObject:match];
+	});
+
 	if(bufferSize)
 		*bufferSize = total;
 
-	std::map<std::string, std::string> captures;
-	std::pair<ssize_t, ssize_t> m = f.match(nullptr, 0, &captures);
-	while(m.first <= m.second)
-	{
-		ranges.emplace_back(total + m.first, total + m.second, captures);
-		captures.clear();
-		m = f.match(nullptr, 0, &captures);
-	}
-
-	if(ranges.empty())
+	if(results.count == 0)
 		return nil;
 
 	__block std::string text;
@@ -1388,53 +1377,47 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	size_t bol = 0, crlfCount = 0;
 	size_t eol = text.find(crlf, bol);
 
-	NSMutableArray<OakDocumentMatch*>* results = [NSMutableArray array];
-	for(auto const& range : ranges)
+	for(OakDocumentMatch* match in results)
 	{
-		while(eol != std::string::npos && eol + crlf.size() <= range.from)
+		while(eol != std::string::npos && eol + crlf.size() <= match.first)
 		{
 			bol = eol + crlf.size();
 			eol = text.find(crlf, bol);
 			++crlfCount;
 		}
 
-		text::pos_t from(crlfCount, range.from - bol);
+		text::pos_t from(crlfCount, match.first - bol);
 		size_t fromOffset = bol;
 
-		while(eol != std::string::npos && eol + crlf.size() <= range.to)
+		while(eol != std::string::npos && eol + crlf.size() <= match.last)
 		{
 			bol = eol + crlf.size();
 			eol = text.find(crlf, bol);
 			++crlfCount;
 		}
 
-		text::pos_t to(crlfCount, range.to - bol);
-		size_t toOffset = bol == range.to ? bol : (eol != std::string::npos ? (range.to <= eol ? eol : eol + crlf.size()) : text.size());
+		text::pos_t to(crlfCount, match.last - bol);
+		size_t toOffset = (bol == match.last && match.first != match.last) ? bol : (eol != std::string::npos ? (match.last <= eol ? eol : eol + crlf.size()) : text.size());
 
 		size_t orgFromOffset = fromOffset;
-		if(range.from - fromOffset > 200)
-			fromOffset = utf8::find_safe_end(text.begin(), text.begin() + range.from - ((range.from - fromOffset) % 150)) - text.begin();
+		if(match.first - fromOffset > 200)
+			fromOffset = utf8::find_safe_end(text.begin(), text.begin() + match.first - ((match.first - fromOffset) % 150)) - text.begin();
 
 		size_t orgToOffset = toOffset;
 		if(toOffset - fromOffset > 500)
-			toOffset = utf8::find_safe_end(text.begin(), text.begin() + std::max<size_t>(fromOffset + 500, range.to)) - text.begin();
+			toOffset = utf8::find_safe_end(text.begin(), text.begin() + std::max<size_t>(fromOffset + 500, match.last)) - text.begin();
 
-		ASSERT_LE(fromOffset, range.from);
-		ASSERT_LE(range.to, toOffset);
+		ASSERT_LE(fromOffset, match.first);
+		ASSERT_LE(match.last, toOffset);
 
-		OakDocumentMatch* match = [OakDocumentMatch new];
 		match.document      = self;
 		match.checksum      = crc32.checksum();
-		match.first         = range.from;
-		match.last          = range.to;
-		match.captures      = range.captures;
 		match.range         = text::range_t(from, to);
 		match.excerpt       = to_ns(text.substr(fromOffset, toOffset - fromOffset));
 		match.excerptOffset = fromOffset;
 		match.newlines      = to_ns(crlf);
 		match.headTruncated = orgFromOffset < fromOffset;
 		match.tailTruncated = toOffset < orgToOffset;
-		[results addObject:match];
 	}
 
 	return results;
@@ -1449,7 +1432,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	if(_buffer)
 	{
 		_buffer->set_mark(_buffer->convert(aPos), to_s(aMark), to_s(value ?: @""));
-		[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentMarksDidChangeNotification object:self];
+		[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentMarksDidChangeNotification object:self];
 	}
 	else if(_path)
 	{
@@ -1465,7 +1448,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	if(_buffer)
 	{
 		_buffer->remove_mark(_buffer->convert(aPos), to_s(aMark));
-		[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentMarksDidChangeNotification object:self];
+		[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentMarksDidChangeNotification object:self];
 	}
 	else if(_path)
 	{
@@ -1478,7 +1461,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	if(_buffer)
 	{
 		_buffer->remove_all_marks(to_s(aMark));
-		[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentMarksDidChangeNotification object:self];
+		[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentMarksDidChangeNotification object:self];
 	}
 	else if(_path)
 	{
@@ -1600,40 +1583,35 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	if(_observeFileSystem == flag)
 		return;
 
-	struct watch_t : document::watch_base_t
-	{
-		watch_t (std::string const& path, OakDocument* document) : watch_base_t(path), _self(document) { }
-
-		void callback (int flags, std::string const& newPath)
-		{
-			[_self fileSystemDidChangeToPath:to_ns(newPath) flags:flags];
-		}
-
-	private:
-		__weak OakDocument* _self;
-	};
-
 	_observeFileSystem = flag;
-	_fileSystemObserver.reset();
-
 	if(flag && _path)
-		_fileSystemObserver = std::make_unique<watch_t>(to_s(_path), self);
+	{
+		__weak OakDocument* weakSelf = self;
+		_fileSystemObserver = [KEventManager.sharedInstance addObserverToItemAtURL:[NSURL fileURLWithPath:_path] usingBlock:^(NSURL* url, NSUInteger mask){
+			[weakSelf fileSystemDidChangeToPath:url.path flags:mask];
+		}];
+	}
+	else
+	{
+		[KEventManager.sharedInstance removeObserver:_fileSystemObserver];
+		_fileSystemObserver = nil;
+	}
 }
 
-- (void)fileSystemDidChangeToPath:(NSString*)newPath flags:(int)flags
+- (void)fileSystemDidChangeToPath:(NSString*)newPath flags:(NSUInteger)flags
 {
 	ASSERT_NE(_openCount, 0);
 
-	if((flags & NOTE_RENAME) == NOTE_RENAME)
+	if((flags & DISPATCH_VNODE_RENAME) == DISPATCH_VNODE_RENAME)
 	{
 		self.path = newPath;
 	}
-	else if((flags & NOTE_DELETE) == NOTE_DELETE)
+	else if((flags & DISPATCH_VNODE_DELETE) == DISPATCH_VNODE_DELETE)
 	{
 		self.onDisk = _path && access([_path fileSystemRepresentation], F_OK) == 0;
 		[OakDocumentController.sharedInstance update:self];
 	}
-	else if((flags & NOTE_WRITE) == NOTE_WRITE || (flags & NOTE_CREATE) == NOTE_CREATE)
+	else if((flags & DISPATCH_VNODE_WRITE) == DISPATCH_VNODE_WRITE)
 	{
 		self.onDisk = _path && access([_path fileSystemRepresentation], F_OK) == 0;
 		self.needsImportDocumentChanges = YES;
@@ -1657,8 +1635,8 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 		}
 		else
 		{
-			__weak __block id observerId = [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidBecomeActiveNotification object:NSApp queue:nil usingBlock:^(NSNotification*){
-				[[NSNotificationCenter defaultCenter] removeObserver:observerId];
+			__weak __block id token = [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationDidBecomeActiveNotification object:NSApp queue:nil usingBlock:^(NSNotification*){
+				[NSNotificationCenter.defaultCenter removeObserver:token];
 				if(self.isLoaded)
 					[self importDocumentChanges:self];
 			}];
@@ -1724,13 +1702,13 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 			}
 			else if(!_self.isDocumentEdited)
 			{
-				[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentWillReloadNotification object:_self];
+				[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentWillReloadNotification object:_self];
 				[_self beginUndoGrouping];
 				buffer.replace(0, buffer.size(), yours);
 				[_self endUndoGrouping];
 
 				[_self markDocumentSaved];
-				[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentDidReloadNotification object:_self];
+				[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentDidReloadNotification object:_self];
 			}
 			else if(_self->_snapshot)
 			{
@@ -1742,13 +1720,13 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 
 				if(utf8::is_valid(merged.begin(), merged.end()))
 				{
-					[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentWillReloadNotification object:_self];
+					[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentWillReloadNotification object:_self];
 					[_self beginUndoGrouping];
 					buffer.replace(0, buffer.size(), merged);
 					[_self endUndoGrouping];
 
 					_self.savedRevision = merged == yours ? _self.revision : -1;
-					[[NSNotificationCenter defaultCenter] postNotificationName:OakDocumentDidReloadNotification object:_self];
+					[NSNotificationCenter.defaultCenter postNotificationName:OakDocumentDidReloadNotification object:_self];
 				}
 			}
 			else
@@ -1782,7 +1760,7 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	[self tryLoadBackup];
 	if(self.isLoaded)
 	{
-		OakDocumentEditor* documentEditor = self.documentEditors.firstObject ?: [OakDocumentEditor documentEditorWithDocument:self fontScaleFactor:1];
+		OakDocumentEditor* documentEditor = self.documentEditors.firstObject ?: [OakDocumentEditor documentEditorWithDocument:self fontScaleFactor:1 themeUUID:nil];
 		[documentEditor performReplacements:someReplacements];
 		return YES;
 	}
@@ -1826,9 +1804,9 @@ NSString* OakDocumentBookmarkIdentifier           = @"bookmark";
 	NSPrintOperation* printer = [NSPrintOperation printOperationWithView:[[OakDocumentPrintableView alloc] initWithDocument:self fontName:aFontName]];
 
 	NSMutableDictionary* info = [[printer printInfo] dictionary];
-	info[@"OakPrintThemeUUID"]   = [[NSUserDefaults standardUserDefaults] objectForKey:@"OakPrintThemeUUID"];
-	info[@"OakPrintFontSize"]    = [[NSUserDefaults standardUserDefaults] objectForKey:@"OakPrintFontSize"];
-	info[NSPrintHeaderAndFooter] = [[NSUserDefaults standardUserDefaults] objectForKey:@"OakPrintHeaderAndFooter"];
+	info[@"OakPrintThemeUUID"]   = [NSUserDefaults.standardUserDefaults objectForKey:@"OakPrintThemeUUID"];
+	info[@"OakPrintFontSize"]    = [NSUserDefaults.standardUserDefaults objectForKey:@"OakPrintFontSize"];
+	info[NSPrintHeaderAndFooter] = [NSUserDefaults.standardUserDefaults objectForKey:@"OakPrintHeaderAndFooter"];
 
 	[[printer printInfo] setVerticallyCentered:NO];
 	[[printer printPanel] setOptions:[[printer printPanel] options] | NSPrintPanelShowsPaperSize | NSPrintPanelShowsOrientation];

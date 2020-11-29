@@ -4,7 +4,7 @@
 #import <ns/ns.h>
 #import <oak/debug.h>
 
-NSString* const OakCursorDidHideNotification = @"OakCursorDidHideNotification";
+NSNotificationName const OakCursorDidHideNotification = @"OakCursorDidHideNotification";
 
 void OakRunIOAlertPanel (char const* format, ...)
 {
@@ -59,9 +59,9 @@ NSUInteger const OakMoveNoActionReturn = 3;
 	{
 		NSInteger row = [_tableView selectedRow] + anOffset;
 		NSInteger numberOfRows = [_tableView numberOfRows];
-		if(std::abs(anOffset) == 1 && numberOfRows && [[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsEnableLoopFilterList])
+		if(std::abs(anOffset) == 1 && numberOfRows && [NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsEnableLoopFilterList])
 				row = (row + numberOfRows) % numberOfRows;
-		else	row = oak::cap((NSInteger)0, row, numberOfRows - 1);
+		else	row = std::clamp(row, (NSInteger)0, numberOfRows - 1);
 
 		if([_tableView.delegate respondsToSelector:@selector(tableView:shouldSelectRow:)])
 		{
@@ -69,7 +69,7 @@ NSUInteger const OakMoveNoActionReturn = 3;
 			{
 				if([_tableView.delegate tableView:_tableView shouldSelectRow:row])
 					break;
-				row += anOffset > 0 ? +1 : -1;;
+				row += anOffset > 0 ? +1 : -1;
 			}
 
 			if(row < 0 || row >= numberOfRows)

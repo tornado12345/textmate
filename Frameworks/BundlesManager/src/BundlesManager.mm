@@ -2,10 +2,9 @@
 #import <bundles/load.h>
 #import "InstallBundleItems.h"
 #import <OakAppKit/NSAlert Additions.h>
-#import <OakFoundation/NSDate Additions.h>
+#import <OakFoundation/OakFoundation.h>
 #import <OakFoundation/NSString Additions.h>
-#import <network/network.h>
-#import <network/download_tbz.h>
+#import <SoftwareUpdate/OakDownloadManager.h>
 #import <bundles/locations.h>
 #import <bundles/query.h> // set_index
 #import <regexp/format_string.h>
@@ -13,12 +12,10 @@
 #import <text/decode.h>
 #import <ns/ns.h>
 #import <io/path.h>
+#import <io/move_path.h>
 #import <io/entries.h>
 #import <io/events.h>
 #import <oak/debug.h>
-
-OAK_DEBUG_VAR(BundlesManager);
-OAK_DEBUG_VAR(BundlesManager_FSEvents);
 
 NSString* const kUserDefaultsDisableBundleUpdatesKey       = @"disableBundleUpdates";
 NSString* const kUserDefaultsLastBundleUpdateCheckKey      = @"lastBundleUpdateCheck";
@@ -32,18 +29,10 @@ static NSString* SafeBasename (NSString* name)
 	return [[name stringByReplacingOccurrencesOfString:@"/" withString:@":"] stringByReplacingOccurrencesOfString:@"." withString:@"_"];
 }
 
-static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
+@interface BundlesManager () <OakUserDefaultsObserver>
 {
-	NSDateFormatter* dateFormatter = [[NSDateFormatter alloc] init];
-	dateFormatter.dateFormat = @"yyyy-MM-dd";
+	NSBackgroundActivityScheduler* _updateBundleIndexScheduler;
 
-	NSString* name = [url.pathComponents lastObject];
-	NSString* folder = [[NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES) firstObject] stringByAppendingPathComponent:@"com.macromates.TextMate/Bundles"];
-	return [folder stringByAppendingPathComponent:[[SafeBasename([name stringByDeletingPathExtension]) stringByAppendingFormat:@" (%@)", [dateFormatter stringFromDate:date]] stringByAppendingPathExtension:[name pathExtension]]];
-}
-
-@interface BundlesManager ()
-{
 	std::vector<std::string> bundlesPaths;
 	std::string bundlesIndexPath;
 	std::set<std::string> watchList;
@@ -51,15 +40,10 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 }
 @property (nonatomic) BOOL      autoUpdateBundles;
 
-@property (nonatomic) BOOL      determinateProgress;
-@property (nonatomic) CGFloat   progress;
-@property (nonatomic) NSTimer*  updateTimer;
-
 @property (nonatomic) BOOL      needsCreateBundlesIndex;
 @property (nonatomic) BOOL      needsSaveBundlesIndex;
 
 @property (nonatomic) NSArray<Bundle*>* bundles;
-@property (nonatomic, readonly) key_chain_t keyChain;
 
 @property (nonatomic) NSString* installDirectory;
 @property (nonatomic) NSString* localIndexPath;
@@ -84,20 +68,19 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 		_remoteIndexURL   = [NSURL URLWithString:@REST_API "/bundles"];
 
 		[self userDefaultsDidChange:nil];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(userDefaultsDidChange:) name:NSUserDefaultsDidChangeNotification object:[NSUserDefaults standardUserDefaults]];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationWillTerminate:) name:NSApplicationWillTerminateNotification object:NSApp];
+		OakObserveUserDefaults(self);
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationWillTerminate:) name:NSApplicationWillTerminateNotification object:NSApp];
 	}
 	return self;
 }
 
 - (void)userDefaultsDidChange:(id)sender
 {
-	self.autoUpdateBundles = ![[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsDisableBundleUpdatesKey];
+	self.autoUpdateBundles = ![NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsDisableBundleUpdatesKey];
 }
 
 - (void)applicationWillTerminate:(NSNotification*)aNotification
 {
-	D(DBF_BundlesManager, bug("\n"););
 	if(self.needsSaveBundlesIndex)
 		[self saveBundlesIndex:self];
 }
@@ -107,33 +90,62 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 	if(_autoUpdateBundles == flag)
 		return;
 
-	[_updateTimer invalidate];
-	_updateTimer = nil;
+	[_updateBundleIndexScheduler invalidate];
+	_updateBundleIndexScheduler = nil;
 
 	_autoUpdateBundles = flag;
 	if(_autoUpdateBundles)
 	{
-		NSDate* lastCheck = [[NSUserDefaults standardUserDefaults] objectForKey:kUserDefaultsLastBundleUpdateCheckKey] ?: [NSDate distantPast];
-		if(![[NSFileManager defaultManager] fileExistsAtPath:_remoteIndexPath])
-			lastCheck = [NSDate distantPast];
+		CGFloat updateFrequency = [NSUserDefaults.standardUserDefaults floatForKey:kUserDefaultsBundleUpdateFrequencyKey] ?: kDefaultPollInterval;
 
-		CGFloat updateFrequency = [[NSUserDefaults standardUserDefaults] floatForKey:kUserDefaultsBundleUpdateFrequencyKey] ?: kDefaultPollInterval;
-		NSDate* nextCheck = [lastCheck dateByAddingTimeInterval:updateFrequency];
-		nextCheck = [nextCheck laterDate:[[NSDate date] dateByAddingTimeInterval:5]];
-
-		_updateTimer = [[NSTimer alloc] initWithFireDate:nextCheck interval:updateFrequency target:self selector:@selector(didFireUpdateTimer:) userInfo:nil repeats:YES];
-		[[NSRunLoop currentRunLoop] addTimer:_updateTimer forMode:NSDefaultRunLoopMode];
+		_updateBundleIndexScheduler = [[NSBackgroundActivityScheduler alloc] initWithIdentifier:[NSString stringWithFormat:@"%@.%@", NSBundle.mainBundle.bundleIdentifier, @"UpdateBundleIndex"]];
+		_updateBundleIndexScheduler.interval = updateFrequency;
+		_updateBundleIndexScheduler.repeats  = YES;
+		[_updateBundleIndexScheduler scheduleWithBlock:^(NSBackgroundActivityCompletionHandler completionHandler){
+			os_activity_initiate("Update bundle index", OS_ACTIVITY_FLAG_DEFAULT, ^(){
+				[self tryUpdateBundleIndexAndCallback:^(BOOL wasUpdated){
+					os_log(OS_LOG_DEFAULT, "Newer bundle index retrieved: %{public}s", wasUpdated ? "YES" : "NO");
+					completionHandler(NSBackgroundActivityResultFinished);
+				}];
+			});
+		}];
 	}
 }
 
-- (void)didFireUpdateTimer:(NSTimer*)aTimer
+- (void)tryUpdateBundleIndexAndCallback:(void(^)(BOOL wasUpdated))completionHandler
 {
-	NSSet* oldRecommendations = [NSSet setWithArray:[self.bundles filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"isRecommended == YES"]]];
-	[self updateRemoteIndexWithCompletionHandler:^{
-		NSArray* bundles = [self.bundles filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"(hasUpdate == YES AND isCompatible == YES) OR (isInstalled == NO AND (isMandatory == YES OR (isRecommended == YES AND isCompatible == YES AND NOT (SELF IN %@))))", oldRecommendations]];
-		[self installBundles:bundles completionHandler:^(NSArray<Bundle*>*){ }];
+	[OakDownloadManager.sharedInstance downloadFileAtURL:_remoteIndexURL replacingFileAtURL:[NSURL fileURLWithPath:_remoteIndexPath] publicKeys:self.publicKeys completionHandler:^(BOOL wasUpdated, NSError* error){
+		path::set_attr(_remoteIndexPath.fileSystemRepresentation, "last-check", to_s(oak::date_t::now()));
+		if(!error)
+			[NSUserDefaults.standardUserDefaults setObject:[NSDate date] forKey:kUserDefaultsLastBundleUpdateCheckKey];
+		if(wasUpdated)
+		{
+			os_log(OS_LOG_DEFAULT, "Bundle index updated: %{public}@", _remoteIndexPath);
+			dispatch_async(dispatch_get_main_queue(), ^{
+				if(NSArray* newBundles = [self bundlesByLoadingIndex])
+				{
+					NSSet* oldRecommendations = [NSSet setWithArray:[self.bundles filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"isRecommended == YES"]]];
+					self.bundles = newBundles;
+					NSArray* bundlesToUpdate = [newBundles filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"(hasUpdate == YES AND isCompatible == YES) OR (isInstalled == NO AND (isMandatory == YES OR (isRecommended == YES AND isCompatible == YES AND NOT (SELF IN %@))))", oldRecommendations]];
+					[self installBundles:bundlesToUpdate completionHandler:^(NSArray<Bundle*>* updatedBundles){
+						for(Bundle* bundle in updatedBundles)
+							os_log(OS_LOG_DEFAULT, "%{public}@ bundle updated: %{public}@", bundle.name, bundle.path);
+						completionHandler(wasUpdated);
+					}];
+				}
+				else
+				{
+					completionHandler(wasUpdated);
+				}
+			});
+		}
+		else
+		{
+			if(error)
+				os_log_error(OS_LOG_DEFAULT, "Failed to update bundle index: %{public}@", error.localizedDescription);
+			completionHandler(wasUpdated);
+		}
 	}];
-	[[NSUserDefaults standardUserDefaults] setObject:[NSDate date] forKey:kUserDefaultsLastBundleUpdateCheckKey];
 }
 
 - (void)installBundleItemsAtPaths:(NSArray*)somePaths
@@ -195,7 +207,7 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 	return NO;
 }
 
-- (void)installBundles:(NSArray<Bundle*>*)someBundles completionHandler:(void(^)(NSArray<Bundle*>*))callback
+- (NSProgress*)installBundles:(NSArray<Bundle*>*)someBundles completionHandler:(void(^)(NSArray<Bundle*>*))callback
 {
 	NSMutableSet* bundlesToInstall = [NSMutableSet set];
 
@@ -209,33 +221,51 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 	}
 
 	if([bundlesToInstall count] == 0)
-		return callback(nil);
+		return callback(nil), nil;
 
-	key_chain_t const keyChain = [self keyChain];
-	NSArray* bundles = [bundlesToInstall allObjects];
-	__block std::vector<std::string> res(bundles.count);
+	NSString* bundlesDirectory = [_installDirectory stringByAppendingPathComponent:@"Bundles"];
+	NSError* error;
+	if(![NSFileManager.defaultManager createDirectoryAtPath:bundlesDirectory withIntermediateDirectories:YES attributes:nil error:&error])
+	{
+		os_log_error(OS_LOG_DEFAULT, "Failed to create directory %{public}@: %{public}@", bundlesDirectory, error.localizedDescription);
+		return callback(nil), nil;
+	}
 
 	dispatch_group_t group = dispatch_group_create();
-	dispatch_group_async(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-		dispatch_apply(bundles.count, DISPATCH_APPLY_AUTO, ^(size_t i){
-			Bundle* bundle = bundles[i];
-			NSString* archive = CacheFileForDownload(bundle.downloadURL, bundle.downloadLastUpdated);
+	NSArray* bundles = bundlesToInstall.allObjects;
+	NSProgress* progress = [NSProgress discreteProgressWithTotalUnitCount:bundles.count];
+	__block std::vector<std::string> res(bundles.count);
+	for(NSUInteger i = 0; i < bundles.count; ++i)
+	{
+		dispatch_group_enter(group);
 
-			double progress = 0;
-			std::string error = NULL_STR;
-			std::string const src = network::download_tbz(to_s(bundle.downloadURL), keyChain, to_s(archive), error, &progress, 0, 1);
-			std::string const dst = to_s(bundle.path ?: [[[_installDirectory stringByAppendingPathComponent:@"Bundles"] stringByAppendingPathComponent:SafeBasename(bundle.name)] stringByAppendingPathExtension:@"tmbundle"]);
+		Bundle* bundle = bundles[i];
+		NSURL* destURL = [NSURL fileURLWithPath:bundle.path ?: [[bundlesDirectory stringByAppendingPathComponent:SafeBasename(bundle.name)] stringByAppendingPathExtension:@"tmbundle"] isDirectory:YES];
+		os_log(OS_LOG_DEFAULT, "Download %{public}@ as %{public}@", bundle.downloadURL, destURL.path);
 
-			if(src == NULL_STR)
-				fprintf(stderr, "*** error downloading ‘%s’: %s\n", to_s(bundle.downloadURL).c_str(), error.c_str());
-			else if(path::exists(dst) && !path::remove(dst))
-				fprintf(stderr, "*** unable to remove old bundle ‘%s’\n", dst.c_str());
-			else if(!path::make_dir(path::parent(dst)))
-				fprintf(stderr, "*** destination directoy doesn’t exist ‘%s’\n", path::parent(dst).c_str());
-			else if(path::move(src, dst))
-				res[i] = dst;
-		});
-	});
+		[progress becomeCurrentWithPendingUnitCount:1];
+		[OakDownloadManager.sharedInstance downloadArchiveAtURL:bundle.downloadURL forReplacingURL:destURL publicKeys:self.publicKeys completionHandler:^(NSURL* extractedArchiveURL, NSError* error){
+			if(extractedArchiveURL)
+			{
+				NSError* error;
+				if([NSFileManager.defaultManager replaceItemAtURL:destURL withItemAtURL:extractedArchiveURL backupItemName:nil options:NSFileManagerItemReplacementUsingNewMetadataOnly resultingItemURL:nil error:&error])
+				{
+					res[i] = destURL.fileSystemRepresentation;
+					os_log(OS_LOG_DEFAULT, "Updated %{public}@", destURL.path);
+				}
+				else
+				{
+					os_log_error(OS_LOG_DEFAULT, "Failed to update %{public}@: %{public}@", destURL.path, error.localizedDescription);
+				}
+			}
+			else
+			{
+				os_log_error(OS_LOG_DEFAULT, "Failed to download %{public}@: %{public}@", bundle.downloadURL, error.localizedDescription);
+			}
+			dispatch_group_leave(group);
+		}];
+		[progress resignCurrent];
+	}
 
 	dispatch_group_notify(group, dispatch_get_main_queue(), ^{
 		for(NSUInteger i = 0; i < bundles.count; ++i)
@@ -257,12 +287,13 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 
 		callback(bundles);
 	});
+	return progress;
 }
 
 - (void)uninstallBundle:(Bundle*)bundle
 {
 	bundle.installed = NO;
-	if(!bundle.path || ![[NSFileManager defaultManager] removeItemAtPath:bundle.path error:nil])
+	if(!bundle.path || ![NSFileManager.defaultManager removeItemAtPath:bundle.path error:nil])
 		return;
 
 	[self erasePath:bundle.path];
@@ -281,7 +312,6 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 
 - (void)createBundlesIndex:(id)sender
 {
-	D(DBF_BundlesManager, bug("%s\n", BSTR(_needsCreateBundlesIndex)););
 	if(_needsCreateBundlesIndex == NO)
 		return;
 	_needsCreateBundlesIndex = NO;
@@ -297,7 +327,6 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 
 - (void)saveBundlesIndex:(id)sender
 {
-	D(DBF_BundlesManager, bug("\n"););
 	cache.cleanup(bundlesPaths);
 	if(cache.dirty())
 	{
@@ -309,14 +338,12 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 
 - (void)setNeedsCreateBundlesIndex:(BOOL)flag
 {
-	D(DBF_BundlesManager, bug("%s\n", BSTR(flag)););
 	if(_needsCreateBundlesIndex != flag && (_needsCreateBundlesIndex = flag))
 		[self performSelector:@selector(createBundlesIndex:) withObject:self afterDelay:0];
 }
 
 - (void)setNeedsSaveBundlesIndex:(BOOL)flag
 {
-	D(DBF_BundlesManager, bug("%s\n", BSTR(flag)););
 	if(_needsSaveBundlesIndex != flag && (_needsSaveBundlesIndex = flag))
 		[self performSelector:@selector(saveBundlesIndex:) withObject:self afterDelay:5];
 }
@@ -333,15 +360,13 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 	{
 		void set_replaying_history (bool flag, std::string const& observedPath, uint64_t eventId)
 		{
-			D(DBF_BundlesManager_FSEvents, bug("%s (observing ‘%s’)\n", BSTR(flag), observedPath.c_str()););
-			[[BundlesManager sharedInstance] setEventId:eventId forPath:[NSString stringWithCxxString:observedPath]];
+			[BundlesManager.sharedInstance setEventId:eventId forPath:[NSString stringWithCxxString:observedPath]];
 		}
 
 		void did_change (std::string const& path, std::string const& observedPath, uint64_t eventId, bool recursive)
 		{
-			D(DBF_BundlesManager_FSEvents, bug("%s (observing ‘%s’)\n", path.c_str(), observedPath.c_str()););
-			[[BundlesManager sharedInstance] reloadPath:[NSString stringWithCxxString:path] recursive:recursive];
-			[[BundlesManager sharedInstance] setEventId:eventId forPath:[NSString stringWithCxxString:observedPath]];
+			[BundlesManager.sharedInstance reloadPath:[NSString stringWithCxxString:path] recursive:recursive];
+			[BundlesManager.sharedInstance setEventId:eventId forPath:[NSString stringWithCxxString:observedPath]];
 		}
 	};
 
@@ -355,28 +380,21 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 
 	for(auto path : pathsRemoved)
 	{
-		D(DBF_BundlesManager_FSEvents, bug("unwatch ‘%s’\n", path.c_str()););
 		fs::unwatch(path, &callback);
 	}
 
 	for(auto path : pathsAdded)
 	{
-		D(DBF_BundlesManager_FSEvents, bug("watch ‘%s’\n", path.c_str()););
 		fs::watch(path, &callback, cache.event_id_for_path(path) ?: FSEventsGetCurrentEventId(), 1);
 	}
 }
 
 - (void)erasePath:(NSString*)aPath
 {
-	D(DBF_BundlesManager, bug("%s\n", [aPath UTF8String]););
 	if(cache.erase(to_s(aPath)))
 	{
 		self.needsCreateBundlesIndex = YES;
 		self.needsSaveBundlesIndex   = YES;
-	}
-	else
-	{
-		D(DBF_BundlesManager, bug("no changes\n"););
 	}
 }
 
@@ -387,15 +405,10 @@ static NSString* CacheFileForDownload (NSURL* url, NSDate* date)
 
 - (void)reloadPath:(NSString*)aPath recursive:(BOOL)flag
 {
-	D(DBF_BundlesManager, bug("%s\n", [aPath UTF8String]););
 	if(cache.reload(to_s(aPath), flag))
 	{
 		self.needsCreateBundlesIndex = YES;
 		self.needsSaveBundlesIndex   = YES;
-	}
-	else
-	{
-		D(DBF_BundlesManager, bug("no changes\n"););
 	}
 }
 
@@ -441,7 +454,7 @@ namespace
 
 - (void)moveAvianBundles
 {
-	NSFileManager* fm = [NSFileManager defaultManager];
+	NSFileManager* fm = NSFileManager.defaultManager;
 
 	NSMutableArray* moves = [NSMutableArray array];
 	NSMutableString* moveDescription = [NSMutableString string];
@@ -678,38 +691,25 @@ namespace
 
 		return [[res allValues] sortedArrayUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"name" ascending:YES selector:@selector(localizedCompare:)] ]];
 	}
-
-	static std::tuple<std::string, std::string> conditional_download (std::string const& url, key_chain_t const& keyChain, std::string const& etag)
-	{
-		network::check_signature_t validator(keyChain, kHTTPSigneeHeader, kHTTPSignatureHeader);
-		network::save_t archiver(false);
-		network::header_t collect_etag("etag");
-
-		std::string error = NULL_STR;
-		long res = network::download(network::request_t(url, &validator, &archiver, &collect_etag, NULL).set_entity_tag(etag), &error);
-		if(res == 200)
-			return { archiver.path, collect_etag.value() };
-		else if(res == 304) // Not modified
-			path::remove(archiver.path);
-		else if(res != 0)
-			fprintf(stderr, "*** %s(‘%s’): got ‘%ld’ from server (expected 200)\n", __FUNCTION__, url.c_str(), res);
-		else
-			fprintf(stderr, "*** %s(‘%s’): %s\n", __FUNCTION__, url.c_str(), error.c_str());
-
-		return { NULL_STR, NULL_STR };
-	}
 }
 
-- (key_chain_t)keyChain
+- (NSDictionary<NSString*, NSString*>*)publicKeys
 {
-	key_chain_t res;
+	NSMutableDictionary* res = [NSMutableDictionary dictionary];
+
+	NSProgress* dummy = [NSProgress discreteProgressWithTotalUnitCount:1];
+	[dummy becomeCurrentWithPendingUnitCount:1];
 	for(NSDictionary* key in [[NSDictionary dictionaryWithContentsOfFile:_remoteIndexPath] objectForKey:@"keys"])
-		res.add(key_chain_t::key_t(to_s(key[@"identity"]), to_s(key[@"name"]), to_s(key[@"publicKey"])));
+		res[key[@"identity"]] = key[@"publicKey"];
+	[dummy resignCurrent];
 
-	res.add(key_chain_t::key_t("org.textmate.duff",    "Allan Odgaard",  "-----BEGIN PUBLIC KEY-----\nMIIBtjCCASsGByqGSM44BAEwggEeAoGBAPIE9PpXPK3y2eBDJ0dnR/D8xR1TiT9m\n8DnPXYqkxwlqmjSShmJEmxYycnbliv2JpojYF4ikBUPJPuerlZfOvUBC99ERAgz7\nN1HYHfzFIxVo1oTKWurFJ1OOOsfg8AQDBDHnKpS1VnwVoDuvO05gK8jjQs9E5LcH\ne/opThzSrI7/AhUAy02E9H7EOwRyRNLofdtPxpa10o0CgYBKDfcBscidAoH4pkHR\nIOEGTCYl3G2Pd1yrblCp0nCCUEBCnvmrWVSXUTVa2/AyOZUTN9uZSC/Kq9XYgqwj\nhgzqa8h/a8yD+ao4q8WovwGeb6Iso3WlPl8waz6EAPR/nlUTnJ4jzr9t6iSH9owS\nvAmWrgeboia0CI2AH++liCDvigOBhAACgYAFWO66xFvmF2tVIB+4E7CwhrSi2uIk\ndeBrpmNcZZ+AVFy1RXJelNe/cZ1aXBYskn/57xigklpkfHR6DGqpEbm6KC/47Jfy\ny5GEx+F/eBWEePi90XnLinytjmXRmS2FNqX6D15XNG1xJfjociA8bzC7s4gfeTUd\nlpQkBq2z71yitA==\n-----END PUBLIC KEY-----\n"));
-	res.add(key_chain_t::key_t("org.textmate.msheets", "Michael Sheets", "-----BEGIN PUBLIC KEY-----\nMIIDOzCCAi4GByqGSM44BAEwggIhAoIBAQDfYsqBc18uL7yYb/bDrrEtVTBG8tML\nmMtNFyU8XhlVKWdQJwBGG/fV2Wjc0hVYSeTWv3VueITZbuuVZEePXlem6Dki1DEL\nsMNeDvE/l0MKHXi1+sr1cht7QvuTi/c1UK4I6QNWDJWi7KmqJg3quLCwJfMef1x5\n/qgLUln5cU6+pAj43Vp62bzHJBjAnrC432yD7F4Mxu4oV/PEm5QC6pU7RcvUwAox\np7m7c8+CxX7Aq4dH6Jd8Jt6XuYIktlfcFivvvF60CvxhABDBdGMra4roO0wlJmID\n91oQ3PLxFBsDmbluPJlkmTp4YetsF8/Zd9P3WwBQUArtNdiqKZIQ4uHXAhUAvNZ5\ntZkzuUiblIxZKmOCBN/JeMsCggEBAK9jUiC98+hwY5XcDQjDSLPE4uvv+dHZ29Bx\n8KevX+qzd6shIhp6urvyBXrM+h8l7iB6Jh4Wm3WhqKMBjquRqyGogQDGxJr7QBVk\nQSOiyaKDT4Ue/Nhg1MFsrt3PtS1/nscZ6GGWswrCfQ1t4m/wXDasUSfz2smae+Jd\nZ6UGBzWQMRawyU/O/LX0PlJkBOMHopecAUcxHc2G02P2QwAMKPavwksQ4tWCJvIr\n7ZELfCcVQtG2UnpTRWqLZQaVwSYMHoNK9/reu099sdv9CQ+trH2Q5LlBXJmHloFK\nafiuQPjTmaJVf/piiQ79xJB6VmwoEpOJJG4NYNt7f+I7YCk07xwDggEFAAKCAQA5\nSBwWJouMKUI6Hi0EZ4/Yh98qQmItx4uWTYFdjcUVVYCKK7GIuXu67rfkbCJUrvT9\nID1vw2eyTmbuW2TPuRDsxUcB7WRyyLekl67vpUgMgLBLgYMXQf6RF4HM2tW7UWg7\noNQHkZKWbhDgXdumKzKf/qZPB/LT2Yndv/zqkQ+YXIu08j0RGkxJaAjB7nEv1XGq\nL2VJf8aEi+MnihAtMPCHcW34qswqO1kOCbOWNShlfWHGjKlfdsPYv87RcalHNqps\nk1r60kyEkeZvKGM+FDT80N7cafX286v8n9L4IvvnLr/FDOH4XXzEjXB9Vr5Ffvj1\ndxNPRmDZOo6JNKA8Uvki\n-----END PUBLIC KEY-----\n"));
+	if(res.count)
+		return res;
 
-	return res;
+	return @{
+		@"org.textmate.duff":    @"-----BEGIN PUBLIC KEY-----\nMIIBtjCCASsGByqGSM44BAEwggEeAoGBAPIE9PpXPK3y2eBDJ0dnR/D8xR1TiT9m\n8DnPXYqkxwlqmjSShmJEmxYycnbliv2JpojYF4ikBUPJPuerlZfOvUBC99ERAgz7\nN1HYHfzFIxVo1oTKWurFJ1OOOsfg8AQDBDHnKpS1VnwVoDuvO05gK8jjQs9E5LcH\ne/opThzSrI7/AhUAy02E9H7EOwRyRNLofdtPxpa10o0CgYBKDfcBscidAoH4pkHR\nIOEGTCYl3G2Pd1yrblCp0nCCUEBCnvmrWVSXUTVa2/AyOZUTN9uZSC/Kq9XYgqwj\nhgzqa8h/a8yD+ao4q8WovwGeb6Iso3WlPl8waz6EAPR/nlUTnJ4jzr9t6iSH9owS\nvAmWrgeboia0CI2AH++liCDvigOBhAACgYAFWO66xFvmF2tVIB+4E7CwhrSi2uIk\ndeBrpmNcZZ+AVFy1RXJelNe/cZ1aXBYskn/57xigklpkfHR6DGqpEbm6KC/47Jfy\ny5GEx+F/eBWEePi90XnLinytjmXRmS2FNqX6D15XNG1xJfjociA8bzC7s4gfeTUd\nlpQkBq2z71yitA==\n-----END PUBLIC KEY-----\n",
+		@"org.textmate.msheets": @"-----BEGIN PUBLIC KEY-----\nMIIDOzCCAi4GByqGSM44BAEwggIhAoIBAQDfYsqBc18uL7yYb/bDrrEtVTBG8tML\nmMtNFyU8XhlVKWdQJwBGG/fV2Wjc0hVYSeTWv3VueITZbuuVZEePXlem6Dki1DEL\nsMNeDvE/l0MKHXi1+sr1cht7QvuTi/c1UK4I6QNWDJWi7KmqJg3quLCwJfMef1x5\n/qgLUln5cU6+pAj43Vp62bzHJBjAnrC432yD7F4Mxu4oV/PEm5QC6pU7RcvUwAox\np7m7c8+CxX7Aq4dH6Jd8Jt6XuYIktlfcFivvvF60CvxhABDBdGMra4roO0wlJmID\n91oQ3PLxFBsDmbluPJlkmTp4YetsF8/Zd9P3WwBQUArtNdiqKZIQ4uHXAhUAvNZ5\ntZkzuUiblIxZKmOCBN/JeMsCggEBAK9jUiC98+hwY5XcDQjDSLPE4uvv+dHZ29Bx\n8KevX+qzd6shIhp6urvyBXrM+h8l7iB6Jh4Wm3WhqKMBjquRqyGogQDGxJr7QBVk\nQSOiyaKDT4Ue/Nhg1MFsrt3PtS1/nscZ6GGWswrCfQ1t4m/wXDasUSfz2smae+Jd\nZ6UGBzWQMRawyU/O/LX0PlJkBOMHopecAUcxHc2G02P2QwAMKPavwksQ4tWCJvIr\n7ZELfCcVQtG2UnpTRWqLZQaVwSYMHoNK9/reu099sdv9CQ+trH2Q5LlBXJmHloFK\nafiuQPjTmaJVf/piiQ79xJB6VmwoEpOJJG4NYNt7f+I7YCk07xwDggEFAAKCAQA5\nSBwWJouMKUI6Hi0EZ4/Yh98qQmItx4uWTYFdjcUVVYCKK7GIuXu67rfkbCJUrvT9\nID1vw2eyTmbuW2TPuRDsxUcB7WRyyLekl67vpUgMgLBLgYMXQf6RF4HM2tW7UWg7\noNQHkZKWbhDgXdumKzKf/qZPB/LT2Yndv/zqkQ+YXIu08j0RGkxJaAjB7nEv1XGq\nL2VJf8aEi+MnihAtMPCHcW34qswqO1kOCbOWNShlfWHGjKlfdsPYv87RcalHNqps\nk1r60kyEkeZvKGM+FDT80N7cafX286v8n9L4IvvnLr/FDOH4XXzEjXB9Vr5Ffvj1\ndxNPRmDZOo6JNKA8Uvki\n-----END PUBLIC KEY-----\n",
+	};
 }
 
 - (NSArray<Bundle*>*)bundles
@@ -725,30 +725,6 @@ namespace
 	for(Bundle* bundle : _bundles)
 		previousBundles[bundle.identifier] = bundle;
 	return BundlesFromIndex(_remoteIndexPath, _localIndexPath, _installDirectory, previousBundles);
-}
-
-- (void)updateRemoteIndexWithCompletionHandler:(void(^)())callback
-{
-	std::string const path = to_s(_remoteIndexPath);
-	std::string const url  = to_s(_remoteIndexURL);
-
-	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-		std::string temp, etag;
-		std::tie(temp, etag) = conditional_download(url, self.keyChain, path::get_attr(path, "org.w3.http.etag"));
-
-		if(temp != NULL_STR)
-		{
-			path::set_attr(temp, "org.w3.http.etag", etag);
-			if(path::rename_or_copy(temp, path))
-			{
-				dispatch_async(dispatch_get_main_queue(), ^{
-					self.bundles = [self bundlesByLoadingIndex];
-					callback();
-				});
-			}
-		}
-		path::set_attr(path, "last-check", to_s(oak::date_t::now()));
-	});
 }
 
 - (void)saveLocalIndex

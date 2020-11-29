@@ -9,19 +9,15 @@
 #import <document/OakDocument.h>
 #import <document/OakDocumentController.h>
 
-OAK_DEBUG_VAR(AppController_Documents);
-
 @implementation AppController (Documents)
 - (void)newDocument:(id)sender
 {
-	D(DBF_AppController_Documents, bug("\n"););
 	[[DocumentWindowController new] showWindow:self];
 }
 
 - (void)newFileBrowser:(id)sender
 {
-	D(DBF_AppController_Documents, bug("\n"););
-	NSString* urlString = [[NSUserDefaults standardUserDefaults] stringForKey:kUserDefaultsInitialFileBrowserURLKey];
+	NSString* urlString = [NSUserDefaults.standardUserDefaults stringForKey:kUserDefaultsInitialFileBrowserURLKey];
 	NSURL* url          = urlString ? [NSURL URLWithString:urlString] : nil;
 
 	DocumentWindowController* controller = [DocumentWindowController new];
@@ -32,8 +28,6 @@ OAK_DEBUG_VAR(AppController_Documents);
 
 - (void)openDocument:(id)sender
 {
-	D(DBF_AppController_Documents, bug("\n"););
-
 	NSOpenPanel* openPanel = [NSOpenPanel openPanel];
 	openPanel.allowsMultipleSelection         = YES;
 	openPanel.canChooseDirectories            = YES;
@@ -54,24 +48,21 @@ OAK_DEBUG_VAR(AppController_Documents);
 
 - (BOOL)application:(NSApplication*)theApplication openFile:(NSString*)aPath
 {
-	D(DBF_AppController_Documents, bug("%s\n", [aPath UTF8String]););
-	if(!DidHandleODBEditorEvent([[[NSAppleEventManager sharedAppleEventManager] currentAppleEvent] aeDesc]))
+	if(!DidHandleODBEditorEvent([[NSAppleEventManager.sharedAppleEventManager currentAppleEvent] aeDesc]))
 		OakOpenDocuments(@[ aPath ]);
 	return YES;
 }
 
 - (void)application:(NSApplication*)sender openFiles:(NSArray*)filenames
 {
-	D(DBF_AppController_Documents, bug("%s\n", [[filenames description] UTF8String]););
-	if(!DidHandleODBEditorEvent([[[NSAppleEventManager sharedAppleEventManager] currentAppleEvent] aeDesc]))
+	if(!DidHandleODBEditorEvent([[NSAppleEventManager.sharedAppleEventManager currentAppleEvent] aeDesc]))
 		OakOpenDocuments(filenames);
 	[sender replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
 }
 
 - (BOOL)applicationOpenUntitledFile:(NSApplication*)theApplication
 {
-	D(DBF_AppController_Documents, bug("\n"););
-	if([[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsShowFavoritesInsteadOfUntitledKey])
+	if([NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsShowFavoritesInsteadOfUntitledKey])
 			[self openFavorites:self];
 	else	[self newDocument:self];
 	return YES;
@@ -79,7 +70,6 @@ OAK_DEBUG_VAR(AppController_Documents);
 
 - (void)handleTxMtURL:(NSURL*)aURL
 {
-	D(DBF_AppController_Documents, bug("%s\n", [[aURL absoluteString] UTF8String]););
 	if([[aURL host] isEqualToString:@"open"])
 	{
 		std::map<std::string, std::string> parameters;
@@ -214,9 +204,8 @@ OAK_DEBUG_VAR(AppController_Documents);
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication*)theApplication hasVisibleWindows:(BOOL)flag
 {
-	D(DBF_AppController_Documents, bug("%s\n", BSTR(flag)););
-	BOOL disableUntitledAtReactivationPrefs = [[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsDisableNewDocumentAtReactivationKey];
-	BOOL showFavoritesInsteadPrefs          = [[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsShowFavoritesInsteadOfUntitledKey];
+	BOOL disableUntitledAtReactivationPrefs = [NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsDisableNewDocumentAtReactivationKey];
+	BOOL showFavoritesInsteadPrefs          = [NSUserDefaults.standardUserDefaults boolForKey:kUserDefaultsShowFavoritesInsteadOfUntitledKey];
 	return flag || !disableUntitledAtReactivationPrefs || showFavoritesInsteadPrefs;
 }
 
@@ -226,7 +215,6 @@ OAK_DEBUG_VAR(AppController_Documents);
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender
 {
-	D(DBF_AppController_Documents, bug("%s\n", [NSApp windows].description.UTF8String););
 	return [DocumentWindowController applicationShouldTerminate:sender];
 }
 @end

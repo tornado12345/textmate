@@ -179,19 +179,19 @@ static constexpr CGFloat SwatchButtonWidth  = 24;
 
 		if(buttons.count)
 		{
-			OakAddAutoLayoutViewsToSuperview(buttons, self);
-	  		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[tagButton]-(5)-[tagTextField]|" options:0 metrics:nil views:@{ @"tagButton": buttons.firstObject , @"tagTextField" : _tagTextField }]];
-			[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-[tagTextField]|" options:0 metrics:nil views:@{ @"tagButton": buttons.firstObject , @"tagTextField" : _tagTextField }]];
-			[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-[tagButton]" options:0 metrics:nil views:@{ @"tagButton": buttons.firstObject }]];
-			for(size_t i = 0; i < [buttons count]-1; ++i)
-			{
-				[self addConstraint:[NSLayoutConstraint constraintWithItem:buttons[i] attribute:NSLayoutAttributeRight relatedBy:NSLayoutRelationEqual toItem:buttons[i+1] attribute:NSLayoutAttributeLeft multiplier:1 constant:0]];
-				[self addConstraint:[NSLayoutConstraint constraintWithItem:buttons[i] attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual toItem:buttons[i+1] attribute:NSLayoutAttributeCenterY multiplier:1 constant:0]];
-			}
+			NSStackView* stackView = [NSStackView stackViewWithViews:buttons];
+			stackView.spacing = 0;
+
+			OakAddAutoLayoutViewsToSuperview(@[ stackView ], self);
+
+			NSDictionary* views = @{ @"tagButtons": stackView, @"tagTextField": _tagTextField };
+			[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[tagButtons]-(5)-[tagTextField]|" options:0 metrics:nil views:views]];
+			[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-[tagTextField]|"                 options:0 metrics:nil views:views]];
+			[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-[tagButtons]-(>=20)-|"           options:0 metrics:nil views:views]];
 		}
 		else
 		{
-	  		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[tagTextField]|" options:0 metrics:nil views:@{ @"tagTextField" : _tagTextField }]];
+			[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|[tagTextField]|" options:0 metrics:nil views:@{ @"tagTextField" : _tagTextField }]];
 			[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-[tagTextField]|" options:0 metrics:nil views:@{ @"tagTextField" : _tagTextField }]];
 		}
 
@@ -204,7 +204,7 @@ static constexpr CGFloat SwatchButtonWidth  = 24;
 - (void)mouseDidEnterFinderTagButton:(NSNotification*)aNotificaiton
 {
 	OakRolloverButton* button = aNotificaiton.object;
-	if([self.subviews containsObject:button])
+	if(button.target == self)
 	{
 		self.hoverTag = _favoriteFinderTags[button.tag];
 		if([_selectedTagsToRemove containsObject:_hoverTag])
@@ -216,7 +216,7 @@ static constexpr CGFloat SwatchButtonWidth  = 24;
 - (void)mouseDidLeaveFinderTagButton:(NSNotification*)aNotificaiton
 {
 	OakRolloverButton* button = aNotificaiton.object;
-	if([self.subviews containsObject:button])
+	if(button.target == self)
 	{
 		self.hoverTag = nil;
 		_tagTextField.stringValue = @"Tags…";

@@ -1,4 +1,4 @@
-PLIST_FLAGS = -d'APP_NAME=$APP_NAME' -d'APP_VERSION=$APP_VERSION' -d'APP_MIN_OS=$APP_MIN_OS'
+APP_MIN_OS = 10.12
 
 FLAGS += -c -pipe -fPIC -gdwarf-2
 FLAGS += -m64 -mmacosx-version-min=$APP_MIN_OS
@@ -9,13 +9,12 @@ FLAGS += -Wall -Wwrite-strings -Wformat -Winit-self -Wmissing-include-dirs -Wno-
 FLAGS += -IShared/include
 FLAGS += -fcolor-diagnostics
 
-# FLAGS += -D_GLIBCXX_DEBUG
 FLAGS += -DNDEBUG -Os
 # LINK   = OakDebug
 
-CXX_FLAGS    += -fvisibility=hidden -std=c++14
+CXX_FLAGS    += -fvisibility=hidden -std=c++2a
 OBJC_FLAGS   += -fvisibility=hidden -fobjc-arc -std=c99 -fobjc-abi-version=3
-OBJCXX_FLAGS += -fvisibility=hidden -std=c++14 -fobjc-abi-version=3
+OBJCXX_FLAGS += -fvisibility=hidden -std=c++2a -fobjc-abi-version=3
 OBJCXX_FLAGS += -fobjc-arc -fobjc-call-cxx-cdtors
 LIBS         += c++
 
@@ -27,12 +26,16 @@ LN_FLAGS += -fvisibility=hidden
 LN_FLAGS += -Wl,-dead_strip
 LN_FLAGS += -Wl,-dead_strip_dylibs
 
+CODESIGN_FLAGS = --options runtime --timestamp
+
 FLAGS += -I"$libressl_prefix/include"
 FLAGS += -I"$capnp_prefix/include"
 
 PRELUDE = Shared/PCH/prelude.*
 
+LN_FLAGS += -fobjc-link-runtime
+
 TARGETS  = vendor/*/target
 TARGETS += Frameworks/*/target
-TARGETS += Applications/target
+TARGETS += Applications/*/target
 TARGETS += PlugIns/*/*.target

@@ -15,7 +15,6 @@ static double const  kFadeFinishTime = 0.70;
 
 @interface OakPopOutView : NSView <CAAnimationDelegate>
 {
-	OBJC_WATCH_LEAKS(OakPopOutView);
 	CALayer* imageLayer;
 	CAShapeLayer* shapeLayer;
 }
@@ -68,7 +67,7 @@ void OakShowPopOutAnimation (NSView* parentView, NSRect popOutRect, NSImage* anI
 	[[window contentView] addSubview:aView];
 
 	if(NSScrollView* scrollView = parentView.enclosingScrollView)
-		[[NSNotificationCenter defaultCenter] addObserver:aView selector:@selector(parentViewBoundsDidChange:) name:NSViewBoundsDidChangeNotification object:scrollView.contentView];
+		[NSNotificationCenter.defaultCenter addObserver:aView selector:@selector(parentViewBoundsDidChange:) name:NSViewBoundsDidChangeNotification object:scrollView.contentView];
 
 	[window setFrame:[window frameRectForContentRect:windowRect] display:YES];
 	[parentView.window addChildWindow:window ordered:NSWindowAbove];
@@ -170,6 +169,6 @@ void OakShowPopOutAnimation (NSView* parentView, NSRect popOutRect, NSImage* anI
 
 - (void)dealloc
 {
-	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	[NSNotificationCenter.defaultCenter removeObserver:self];
 }
 @end

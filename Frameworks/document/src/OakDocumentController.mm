@@ -116,20 +116,27 @@ namespace
 - (OakDocument*)documentWithPath:(NSString*)aPath
 {
 	std::lock_guard<std::mutex> lock(_lock);
+	OakDocument* doc;
 
 	if(aPath)
 	{
 		auto pathIter = _documents_by_path.find(to_s(aPath));
 		if(pathIter != _documents_by_path.end())
-			return pathIter->second->document;
+			doc = pathIter->second->document;
 
-		auto inodeIter = _documents_by_inode.find(inode_t(to_s(aPath)));
-		if(inodeIter != _documents_by_inode.end())
-			return inodeIter->second->document;
+		if(!doc)
+		{
+			auto inodeIter = _documents_by_inode.find(inode_t(to_s(aPath)));
+			if(inodeIter != _documents_by_inode.end())
+				doc = inodeIter->second->document;
+		}
 	}
 
-	OakDocument* doc = [[OakDocument alloc] initWithPath:aPath];
-	[self internalAddDocument:doc];
+	if(!doc)
+	{
+		doc = [[OakDocument alloc] initWithPath:aPath];
+		[self internalAddDocument:doc];
+	}
 	return doc;
 }
 
@@ -250,12 +257,12 @@ namespace
 	_rankedPaths = [NSMutableDictionary dictionary];
 	_rankedUUIDs = [NSMutableDictionary dictionary];
 
-	NSArray* paths = [[NSUserDefaults standardUserDefaults] stringArrayForKey:@"LRUDocumentPaths"];
+	NSArray* paths = [NSUserDefaults.standardUserDefaults stringArrayForKey:@"LRUDocumentPaths"];
 
 	// LEGACY format used by 2.0-beta.12.11 and earlier
 	if(!paths)
 	{
-		NSDictionary* dictionary = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"LRUDocumentPaths"];
+		NSDictionary* dictionary = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"LRUDocumentPaths"];
 		paths = dictionary[@"paths"];
 	}
 
@@ -277,7 +284,7 @@ namespace
 		if(array.count == 50)
 			break;
 	}
-	[[NSUserDefaults standardUserDefaults] setObject:array forKey:@"LRUDocumentPaths"];
+	[NSUserDefaults.standardUserDefaults setObject:array forKey:@"LRUDocumentPaths"];
 }
 
 - (NSInteger)lruRankForDocument:(OakDocument*)aDocument

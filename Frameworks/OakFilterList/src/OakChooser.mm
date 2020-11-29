@@ -31,8 +31,8 @@
 
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(4)-[icon]-(4)-[file]-(4)-[close(==16)]-(8)-|" options:0 metrics:nil views:views]];
 		[self addConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:[file]-(2)-[folder]-(5)-|" options:NSLayoutFormatAlignAllLeading|NSLayoutFormatAlignAllTrailing metrics:nil views:views]];
-		[self addConstraint:[NSLayoutConstraint constraintWithItem:self attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual toItem:imageView attribute:NSLayoutAttributeCenterY multiplier:1 constant:0]];
-		[self addConstraint:[NSLayoutConstraint constraintWithItem:self attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual toItem:closeButton attribute:NSLayoutAttributeCenterY multiplier:1 constant:0]];
+		[imageView.centerYAnchor constraintEqualToAnchor:self.centerYAnchor].active   = YES;
+		[closeButton.centerYAnchor constraintEqualToAnchor:self.centerYAnchor].active = YES;
 
 		[imageView bind:NSValueBinding toObject:self withKeyPath:@"objectValue.icon" options:nil];
 		[fileTextField bind:NSValueBinding toObject:self withKeyPath:@"objectValue.name" options:nil];
@@ -111,7 +111,7 @@ NSMutableAttributedString* CreateAttributedStringWithMarkedUpRanges (std::string
 	return res;
 }
 
-@interface OakChooser () <NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate>
+@interface OakChooser () <NSWindowDelegate, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate>
 {
 	NSTitlebarAccessoryViewController* _accessoryViewController;
 
@@ -137,6 +137,7 @@ static void* kFirstResponderBinding = &kFirstResponderBinding;
 		[[self.window standardWindowButton:NSWindowZoomButton] setHidden:YES];
 		self.window.level             = NSFloatingWindowLevel;
 		self.window.frameAutosaveName = NSStringFromClass([self class]);
+		self.window.delegate          = self;
 
 		[self.window addObserver:self forKeyPath:@"firstResponder" options:NSKeyValueObservingOptionOld|NSKeyValueObservingOptionNew context:kFirstResponderBinding];
 	}
@@ -157,13 +158,6 @@ static void* kFirstResponderBinding = &kFirstResponderBinding;
 // =====================
 // = View Construction =
 // =====================
-
-- (NSBox*)makeDividerView
-{
-	NSBox* dividerView = [[NSBox alloc] initWithFrame:NSZeroRect];
-	dividerView.boxType     = NSBoxSeparator;
-	return dividerView;
-}
 
 - (void)addTitlebarAccessoryView:(NSView*)titlebarView
 {
@@ -307,6 +301,12 @@ static void* kFirstResponderBinding = &kFirstResponderBinding;
 
 - (void)showWindow:(id)sender
 {
+	if(self.isWindowLoaded && self.window.isVisible && self.window.isKeyWindow)
+	{
+		[self.window close];
+		return;
+	}
+
 	[self.window makeFirstResponder:self.window.initialFirstResponder];
 	[super showWindow:sender];
 }
@@ -369,7 +369,7 @@ static void* kFirstResponderBinding = &kFirstResponderBinding;
 
 	[self updateFilterString:_filterString];
 
-	// see http://lists.apple.com/archives/accessibility-dev/2014/Aug/msg00024.html
+	// see https://lists.apple.com/archives/accessibility-dev/2014/Aug/msg00024.html
 	NSAccessibilityPostNotification(_tableView, NSAccessibilitySelectedRowsChangedNotification);
 }
 
@@ -405,7 +405,7 @@ static void* kFirstResponderBinding = &kFirstResponderBinding;
 		[rowIndexes addIndex:0];
 
 	[_tableView selectRowIndexes:rowIndexes byExtendingSelection:NO];
-	if([[NSUserDefaults standardUserDefaults] boolForKey:@"disableFilterListAutoScroll"] == NO)
+	if([NSUserDefaults.standardUserDefaults boolForKey:@"disableFilterListAutoScroll"] == NO)
 		[_tableView scrollRowToVisible:[rowIndexes firstIndex]];
 
 	[self updateStatusText:self];

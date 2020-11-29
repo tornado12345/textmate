@@ -1,15 +1,11 @@
 #ifndef OAK_DEBUGLOG_H_G4IOWMJN
 #define OAK_DEBUGLOG_H_G4IOWMJN
 
-#ifndef BSTR
-#define BSTR(b) ((b)?"YES":"NO")
-#endif
-
 #ifndef NDEBUG
 
-PUBLIC void OakPrintF (char const* file, char const* function, int line, char const* format, ...) __attribute__ ((format (printf, 4, 5)));
+void OakPrintF (char const* file, char const* function, int line, char const* format, ...) __attribute__ ((format (printf, 4, 5)));
 
-struct PUBLIC OakDebugBaseClass
+struct OakDebugBaseClass
 {
 	static bool checkForDebugVar (char const* name);
 	static std::map<std::string, bool>& registry ();

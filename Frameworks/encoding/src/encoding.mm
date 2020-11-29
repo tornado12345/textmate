@@ -157,7 +157,7 @@ namespace encoding
 			real_load(path);
 		}
 		catch(std::exception const& e) {
-			fprintf(stderr, "exception thrown while loading ‘%s’: %s\n", path.c_str(), e.what());
+			os_log_error(OS_LOG_DEFAULT, "Exception thrown while loading ‘%{public}s’: %{public}s", path.c_str(), e.what());
 		}
 	}
 
@@ -170,16 +170,16 @@ namespace encoding
 			auto freq = message.getRoot<Frequencies>();
 			if(freq.getVersion() != kCapnpClassifierFormatVersion)
 			{
-				fprintf(stderr, "skip ‘%s’ version %u (expected %u)\n", path.c_str(), freq.getVersion(), kCapnpClassifierFormatVersion);
+				os_log_info(OS_LOG_DEFAULT, "Skip ‘%{public}s’ version %u (expected %u)", path.c_str(), freq.getVersion(), kCapnpClassifierFormatVersion);
 				return;
 			}
 
-			for(auto const& src : freq.getCharsets())
+			for(auto src : freq.getCharsets())
 			{
 				record_t r;
-				for(auto const& word : src.getWords())
+				for(auto word : src.getWords())
 					r.words.emplace(word.getType().getWord(), word.getCount());
-				for(auto const& byte : src.getBytes())
+				for(auto byte : src.getBytes())
 					r.bytes.emplace(byte.getType().getByte(), byte.getCount());
 				_charsets.emplace(src.getCharset(), r);
 			}
@@ -270,7 +270,7 @@ namespace encoding
 		_path = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"com.macromates.TextMate/EncodingFrequencies.binary"];
 		_database.load(_path.fileSystemRepresentation);
 
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(applicationWillTerminate:) name:NSApplicationWillTerminateNotification object:NSApp];
+		[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(applicationWillTerminate:) name:NSApplicationWillTerminateNotification object:NSApp];
 	}
 	return self;
 }

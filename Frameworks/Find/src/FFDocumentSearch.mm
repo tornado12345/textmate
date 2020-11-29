@@ -7,13 +7,11 @@
 #import <ns/ns.h>
 #import <oak/oak.h>
 
-NSString* const FFDocumentSearchDidReceiveResultsNotification = @"FFDocumentSearchDidReceiveResultsNotification";
-NSString* const FFDocumentSearchDidFinishNotification         = @"FFDocumentSearchDidFinishNotification";
+NSNotificationName const FFDocumentSearchDidReceiveResultsNotification = @"FFDocumentSearchDidReceiveResultsNotification";
+NSNotificationName const FFDocumentSearchDidFinishNotification         = @"FFDocumentSearchDidFinishNotification";
 
 @interface FFDocumentSearch ()
 {
-	OBJC_WATCH_LEAKS(FFDocumentSearch);
-
 	BOOL           _searching;
 	NSUInteger     _lastSearchToken;
 
@@ -29,8 +27,6 @@ NSString* const FFDocumentSearchDidFinishNotification         = @"FFDocumentSear
 @property (nonatomic, readwrite) NSString* currentPath;
 @property NSString* lastDocumentPath;
 @end
-
-OAK_DEBUG_VAR(Find_FolderSearch);
 
 static NSDictionary* GlobOptionsForPath (std::string const& path, NSString* glob, BOOL searchBinaryFiles, BOOL searchHiddenFolders)
 {
@@ -71,7 +67,6 @@ static NSDictionary* GlobOptionsForPath (std::string const& path, NSString* glob
 @implementation FFDocumentSearch
 - (void)start
 {
-	D(DBF_Find_FolderSearch, bug("folders %s, searchString ‘%s’\n", [[_paths description] UTF8String], [_searchString UTF8String]););
 	[self stop];
 	_matches = [NSMutableArray array];
 
@@ -115,7 +110,7 @@ static NSDictionary* GlobOptionsForPath (std::string const& path, NSString* glob
 				_searching = NO;
 				_searchDuration = [[NSDate date] timeIntervalSinceDate:searchStartDate];
 				[self updateMatches:nil];
-				[[NSNotificationCenter defaultCenter] postNotificationName:FFDocumentSearchDidFinishNotification object:self];
+				[NSNotificationCenter.defaultCenter postNotificationName:FFDocumentSearchDidFinishNotification object:self];
 			}
 		});
 	});
@@ -127,13 +122,11 @@ static NSDictionary* GlobOptionsForPath (std::string const& path, NSString* glob
 
 - (void)updateMatches:(NSTimer*)timer
 {
-	D(DBF_Find_FolderSearch, bug("\n"););
-
 	self.currentPath = [self.lastDocumentPath stringByDeletingLastPathComponent];
 	@synchronized(self) {
 		if(_matches.count)
 		{
-			[[NSNotificationCenter defaultCenter] postNotificationName:FFDocumentSearchDidReceiveResultsNotification object:self userInfo:@{ @"matches": _matches }];
+			[NSNotificationCenter.defaultCenter postNotificationName:FFDocumentSearchDidReceiveResultsNotification object:self userInfo:@{ @"matches": _matches }];
 			[_matches removeAllObjects];
 		}
 	}
@@ -145,7 +138,6 @@ static NSDictionary* GlobOptionsForPath (std::string const& path, NSString* glob
 
 - (void)stop
 {
-	D(DBF_Find_FolderSearch, bug("\n"););
 	if(std::exchange(_searching, NO))
 		++_lastSearchToken;
 

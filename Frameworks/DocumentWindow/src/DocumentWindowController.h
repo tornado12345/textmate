@@ -2,7 +2,7 @@
 
 @class OakDocument;
 
-PUBLIC @interface DocumentWindowController : NSResponder
+@interface DocumentWindowController : NSResponder
 @property (nonatomic) NSWindow*                                  window;
 
 @property (nonatomic) NSUUID*                                    identifier;
@@ -15,7 +15,7 @@ PUBLIC @interface DocumentWindowController : NSResponder
 @property (nonatomic) NSUInteger                                 selectedTabIndex;
 
 @property (nonatomic) BOOL                                       fileBrowserVisible;
-@property (nonatomic) NSDictionary*                              fileBrowserHistory;
+@property (nonatomic) id                                         fileBrowserHistory;
 @property (nonatomic) CGFloat                                    fileBrowserWidth;
 
 @property (nonatomic) BOOL                                       htmlOutputVisible;

@@ -1,14 +1,9 @@
-#import <oak/misc.h>
 #import <scm/status.h>
 
-PUBLIC extern NSURL* const kURLLocationComputer;
-PUBLIC extern NSURL* const kURLLocationFavorites;
+extern NSURL* const kURLLocationComputer;
+extern NSURL* const kURLLocationFavorites;
 
 @class OakFinderTag;
-
-@interface NSURL (CompatibilityWrapper)
-@property (nonatomic, readonly) BOOL tmHasDirectoryPath;
-@end
 
 @interface FileItem : NSObject <QLPreviewItem>
 @property (nonatomic) NSURL* URL;
